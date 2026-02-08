@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A-Team Console v3.0</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: linear-gradient(145deg, #0C0C1D 0%, #1A1A2E 40%, #16213E 100%);
+      color: #E2E8F0;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    .header {
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 16px; }
+
+    .logo {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, #F59E0B, #EF4444);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 700; color: #fff;
+    }
+
+    .header-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 28px; font-weight: 700;
+      background: linear-gradient(135deg, #F59E0B, #EF4444, #3B82F6, #10B981);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; letter-spacing: -0.5px;
+    }
+
+    .header-sub {
+      font-size: 11px; color: #64748B; letter-spacing: 1px; margin-top: 2px;
+    }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 20px; font-size: 11px;
+      font-weight: 500; letter-spacing: 0.5px;
+      background: rgba(16,185,129,0.15); color: #10B981;
+      border: 1px solid rgba(16,185,129,0.3);
+    }
+
+    .status-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: #10B981;
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    .roster {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 12px; margin-bottom: 24px;
+    }
+
+    .roster-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px; padding: 12px 14px;
+      display: flex; align-items: center; gap: 10px;
+      transition: all 0.3s;
+    }
+
+    .roster-card.active { border-color: var(--agent-color); }
+    .roster-card.active .agent-avatar { opacity: 1; }
+
+    .agent-avatar {
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+
+    .agent-name {
+      font-size: 13px; font-weight: 600; color: #E2E8F0;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .agent-role {
+      font-size: 10px; color: #64748B; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .thinking-label {
+      margin-left: auto; font-size: 10px; font-weight: 600;
+      flex-shrink: 0; animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .done-dot {
+      margin-left: auto; width: 8px; height: 8px;
+      border-radius: 50%; background: #10B981; flex-shrink: 0;
+    }
+
+    @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+    @keyframes slideIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+
+    .query-area { margin-bottom: 24px; }
+
+    .query-input {
+      width: 100%; background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 12px;
+      padding: 16px 20px; color: #E2E8F0;
+      font-family: 'JetBrains Mono', monospace; font-size: 14px;
+      outline: none; resize: none; transition: border-color 0.2s;
+    }
+
+    .query-input:focus {
+      border-color: rgba(245,158,11,0.5);
+      box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
+    }
+
+    .query-input::placeholder { color: rgba(255,255,255,0.3); }
+
+    .query-footer {
+      display: flex; justify-content: space-between;
+      align-items: center; margin-top: 10px;
+    }
+
+    .query-hint { font-size: 11px; color: #475569; }
+
+    .run-btn {
+      background: linear-gradient(135deg, #F59E0B, #D97706);
+      color: #000; border: none; border-radius: 12px;
+      padding: 16px 32px; font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 15px; cursor: pointer;
+      transition: all 0.2s; letter-spacing: 0.5px;
+    }
+
+    .run-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(245,158,11,0.3);
+    }
+
+    .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .error-box {
+      background: rgba(220,38,38,0.1);
+      border: 1px solid rgba(220,38,38,0.3);
+      border-radius: 10px; padding: 16px; margin-bottom: 20px;
+      font-size: 13px; color: #FCA5A5;
+    }
+
+    .responses { display: flex; flex-direction: column; gap: 16px; }
+
+    .response-card {
+      border-radius: 12px; padding: 16px; position: relative;
+      overflow: hidden; animation: slideIn 0.4s ease-out forwards;
+    }
+
+    .response-card .top-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      border-radius: 12px 12px 0 0;
+    }
+
+    .response-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    }
+
+    .response-avatar {
+      width: 28px; height: 28px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #fff;
+    }
+
+    .response-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 14px; color: #F1F5F9;
+    }
+
+    .response-role { color: #64748B; font-size: 12px; margin-left: 8px; }
+
+    .provider-tag {
+      margin-left: auto; font-size: 9px; color: #475569;
+      letter-spacing: 1px; text-transform: uppercase;
+      padding: 2px 8px; border-radius: 4px;
+      background: rgba(255,255,255,0.05);
+    }
+
+    .response-text {
+      font-size: 13px; line-height: 1.7; color: #CBD5E1;
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+
+    .synthesis-card {
+      background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(239,68,68,0.05));
+      border: 1px solid rgba(245,158,11,0.25);
+      border-radius: 12px; padding: 20px; position: relative;
+      animation: slideIn 0.4s ease-out forwards;
+    }
+
+    .synthesis-card .top-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, #F59E0B, #EF4444, #3B82F6, #10B981);
+      border-radius: 12px 12px 0 0;
+    }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: #475569;
+    }
+
+    .empty-star { font-size: 40px; margin-bottom: 16px; }
+
+    .empty-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 18px; font-weight: 600; color: #64748B; margin-bottom: 8px;
+    }
+
+    .empty-text {
+      font-size: 13px; max-width: 400px; margin: 0 auto; line-height: 1.6;
+    }
+
+    .suggestions {
+      margin-top: 24px; display: flex; gap: 8px;
+      justify-content: center; flex-wrap: wrap;
+    }
+
+    .suggestion-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 8px 14px; color: #94A3B8;
+      font-size: 12px; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      transition: all 0.2s;
+    }
+
+    .suggestion-btn:hover {
+      background: rgba(255,255,255,0.1); color: #E2E8F0;
+    }
+
+    .history-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; padding: 8px 16px; color: #94A3B8;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      cursor: pointer; transition: all 0.2s;
+    }
+
+    .history-btn:hover { background: rgba(255,255,255,0.1); color: #E2E8F0; }
+
+    .history-panel {
+      margin-top: 24px; background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 20px;
+    }
+
+    .history-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 16px; margin-bottom: 16px; color: #E2E8F0;
+    }
+
+    .history-item {
+      padding: 12px 0; cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .history-item:last-child { border-bottom: none; }
+    .history-query { font-size: 13px; color: #E2E8F0; margin-bottom: 4px; }
+    .history-meta { font-size: 11px; color: #64748B; }
+
+    @media (max-width: 768px) {
+      .roster { grid-template-columns: repeat(2, 1fr); }
+      .header-title { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">A</div>
+      <div>
+        <div class="header-title">A-TEAM CONSOLE</div>
+        <div class="header-sub">v3.0 &middot; 4 AI BRAINS &middot; 4 REAL APIs</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div id="statusBadge" class="status-badge">
+        <div class="status-dot"></div>
+        <span id="statusText">CHECKING...</span>
+      </div>
+      <button id="historyBtn" class="history-btn" style="display:none;" onclick="toggleHistory()">
+        History (<span id="historyCount">0</span>)
+      </button>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Agent Roster -->
+    <div class="roster">
+      <div class="roster-card" id="card-claude" style="--agent-color:#F59E0B66;">
+        <div class="agent-avatar" style="background:#D97706;">C</div>
+        <div style="min-width:0;">
+          <div class="agent-name">Claude</div>
+          <div class="agent-role">Principal Architect</div>
+        </div>
+        <div class="thinking-label" style="color:#D97706;display:none;" id="think-claude">THINKING...</div>
+        <div class="done-dot" style="display:none;" id="done-claude"></div>
+      </div>
+      <div class="roster-card" id="card-chatgpt" style="--agent-color:#10B98166;">
+        <div class="agent-avatar" style="background:#059669;">G</div>
+        <div style="min-width:0;">
+          <div class="agent-name">ChatGPT</div>
+          <div class="agent-role">Financial Analyst</div>
+        </div>
+        <div class="thinking-label" style="color:#059669;display:none;" id="think-chatgpt">THINKING...</div>
+        <div class="done-dot" style="display:none;" id="done-chatgpt"></div>
+      </div>
+      <div class="roster-card" id="card-gemini" style="--agent-color:#3B82F666;">
+        <div class="agent-avatar" style="background:#2563EB;">G</div>
+        <div style="min-width:0;">
+          <div class="agent-name">Gemini</div>
+          <div class="agent-role">Data Analyst</div>
+        </div>
+        <div class="thinking-label" style="color:#2563EB;display:none;" id="think-gemini">THINKING...</div>
+        <div class="done-dot" style="display:none;" id="done-gemini"></div>
+      </div>
+      <div class="roster-card" id="card-grok" style="--agent-color:#EF444466;">
+        <div class="agent-avatar" style="background:#DC2626;">X</div>
+        <div style="min-width:0;">
+          <div class="agent-name">Grok</div>
+          <div class="agent-role">Devil's Advocate</div>
+        </div>
+        <div class="thinking-label" style="color:#DC2626;display:none;" id="think-grok">THINKING...</div>
+        <div class="done-dot" style="display:none;" id="done-grok"></div>
+      </div>
+    </div>
+
+    <!-- Query Input -->
+    <div class="query-area">
+      <textarea id="queryInput" class="query-input" rows="3"
+        placeholder="Ask your A-Team a question... (Enter to send)"></textarea>
+      <div class="query-footer">
+        <div class="query-hint" id="statusHint">4 real AI providers — each agent is a different brain</div>
+        <button id="runBtn" class="run-btn" onclick="runConsultation()">CONSULT A-TEAM</button>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorBox" class="error-box" style="display:none;"></div>
+
+    <!-- Responses -->
+    <div id="responses" class="responses"></div>
+
+    <!-- History -->
+    <div id="historyPanel" class="history-panel" style="display:none;">
+      <div class="history-title">Consultation History</div>
+      <div id="historyList"></div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state">
+      <div class="empty-star">&#9733;</div>
+      <div class="empty-title">Your A-Team is ready</div>
+      <div class="empty-text">
+        Ask any question and get perspectives from four different AI brains.
+        Claude (Anthropic), ChatGPT (OpenAI), Gemini (Google), and Grok (xAI).
+      </div>
+      <div class="suggestions">
+        <button class="suggestion-btn" onclick="setQuery('Should we start with SPY or SOXL for our first paper trading tests, and why?')">SPY vs SOXL for paper trading?</button>
+        <button class="suggestion-btn" onclick="setQuery('What are the biggest risks with SOXL day trading for a $30K account?')">SOXL day trading risks?</button>
+        <button class="suggestion-btn" onclick="setQuery('Compare Alpaca vs TradeStation vs TradersPost for automated trading')">Alpaca vs TradeStation?</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AGENTS = [
+      { id: 'claude', name: 'Claude', role: 'Principal Architect & Team Lead', color: '#D97706', provider: 'Anthropic' },
+      { id: 'chatgpt', name: 'ChatGPT', role: 'Financial Research Analyst', color: '#059669', provider: 'OpenAI' },
+      { id: 'gemini', name: 'Gemini', role: 'Data Analyst & Ranker', color: '#2563EB', provider: 'Google' },
+      { id: 'grok', name: 'Grok', role: "Devil's Advocate & Risk Analyst", color: '#DC2626', provider: 'xAI' }
+    ];
+
+    let isRunning = false;
+    let history = [];
+
+    // Check API health on load
+    async function checkHealth() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        const count = Object.values(data.providers).filter(Boolean).length;
+        const badge = document.getElementById('statusText');
+        const dot = document.querySelector('.status-dot');
+        if (count === 4) {
+          badge.textContent = '4/4 APIS LIVE';
+          dot.style.background = '#10B981';
+        } else if (count > 0) {
+          badge.textContent = `${count}/4 APIS`;
+          dot.style.background = '#F59E0B';
+        } else {
+          badge.textContent = 'NO APIS';
+          dot.style.background = '#EF4444';
+        }
+      } catch {
+        document.getElementById('statusText').textContent = 'OFFLINE';
+        document.querySelector('.status-dot').style.background = '#EF4444';
+      }
+    }
+    checkHealth();
+
+    // Input handling
+    const input = document.getElementById('queryInput');
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        runConsultation();
+      }
+    });
+
+    function setQuery(q) { input.value = q; input.focus(); }
+
+    function toggleHistory() {
+      const panel = document.getElementById('historyPanel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function showAgent(agentId, state) {
+      const card = document.getElementById(`card-${agentId}`);
+      const think = document.getElementById(`think-${agentId}`);
+      const done = document.getElementById(`done-${agentId}`);
+
+      if (state === 'thinking') {
+        card.classList.add('active');
+        think.style.display = 'block';
+        done.style.display = 'none';
+      } else if (state === 'done') {
+        card.classList.remove('active');
+        think.style.display = 'none';
+        done.style.display = 'block';
+      } else {
+        card.classList.remove('active');
+        think.style.display = 'none';
+        done.style.display = 'none';
+      }
+    }
+
+    function addResponseCard(agent, text) {
+      const bgAlpha = agent.id === 'claude' ? '217,119,6' :
+                       agent.id === 'chatgpt' ? '5,150,105' :
+                       agent.id === 'gemini' ? '37,99,235' : '220,38,38';
+
+      const card = document.createElement('div');
+      card.className = 'response-card';
+      card.style.background = `rgba(${bgAlpha},0.06)`;
+      card.style.border = `1px solid ${agent.color}33`;
+      card.innerHTML = `
+        <div class="top-bar" style="background:${agent.color}"></div>
+        <div class="response-header">
+          <div class="response-avatar" style="background:${agent.color}">${agent.id === 'grok' ? 'X' : agent.name[0]}</div>
+          <div>
+            <span class="response-name">${agent.name}</span>
+            <span class="response-role">${agent.role}</span>
+          </div>
+          <span class="provider-tag">${agent.provider} API</span>
+        </div>
+        <div class="response-text">${escapeHtml(text)}</div>
+      `;
+      document.getElementById('responses').appendChild(card);
+    }
+
+    function addSynthesisCard(text) {
+      const card = document.createElement('div');
+      card.className = 'synthesis-card';
+      card.innerHTML = `
+        <div class="top-bar"></div>
+        <div class="response-header">
+          <div class="response-avatar" style="background:linear-gradient(135deg,#F59E0B,#EF4444)">A</div>
+          <div>
+            <span class="response-name">Principal Architect Synthesis</span>
+            <span class="response-role">Team Lead Summary</span>
+          </div>
+        </div>
+        <div class="response-text">${escapeHtml(text)}</div>
+      `;
+      document.getElementById('responses').appendChild(card);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function runConsultation() {
+      const query = input.value.trim();
+      if (!query || isRunning) return;
+
+      isRunning = true;
+      document.getElementById('runBtn').disabled = true;
+      document.getElementById('runBtn').textContent = 'CONSULTING...';
+      document.getElementById('responses').innerHTML = '';
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('errorBox').style.display = 'none';
+
+      let priorText = '';
+      const allResponses = {};
+
+      try {
+        for (const agent of AGENTS) {
+          showAgent(agent.id, 'thinking');
+          document.getElementById('statusHint').textContent = `Consulting ${agent.name}...`;
+
+          const res = await fetch('/api/consult', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: agent.id,
+              query: query,
+              priorResponses: priorText
+            })
+          });
+
+          const data = await res.json();
+          if (data.error) throw new Error(`${agent.name}: ${data.error}`);
+
+          allResponses[agent.id] = data.response;
+          priorText += `\n\n${agent.name} (${agent.role}): ${data.response}`;
+
+          showAgent(agent.id, 'done');
+          addResponseCard(agent, data.response);
+        }
+
+        // Synthesis
+        document.getElementById('statusHint').textContent = 'Synthesizing team perspectives...';
+        const synthRes = await fetch('/api/synthesize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, allResponses: priorText })
+        });
+        const synthData = await synthRes.json();
+        if (synthData.error) throw new Error(`Synthesis: ${synthData.error}`);
+        addSynthesisCard(synthData.response);
+
+        // Save to history
+        history.unshift({
+          query, responses: allResponses, synthesis: synthData.response,
+          timestamp: new Date().toLocaleTimeString()
+        });
+        updateHistoryUI();
+
+      } catch (err) {
+        document.getElementById('errorBox').textContent = 'Error: ' + err.message;
+        document.getElementById('errorBox').style.display = 'block';
+      }
+
+      isRunning = false;
+      document.getElementById('runBtn').disabled = false;
+      document.getElementById('runBtn').textContent = 'CONSULT A-TEAM';
+      document.getElementById('statusHint').textContent = '4 real AI providers — each agent is a different brain';
+      AGENTS.forEach(a => showAgent(a.id, 'idle'));
+    }
+
+    function updateHistoryUI() {
+      const btn = document.getElementById('historyBtn');
+      const count = document.getElementById('historyCount');
+      const list = document.getElementById('historyList');
+
+      if (history.length > 0) {
+        btn.style.display = 'inline-block';
+        count.textContent = history.length;
+        list.innerHTML = history.map((h, i) => `
+          <div class="history-item" onclick="reloadHistory(${i})">
+            <div class="history-query">"${escapeHtml(h.query)}"</div>
+            <div class="history-meta">${h.timestamp} · 4 responses + synthesis</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function reloadHistory(index) {
+      const h = history[index];
+      document.getElementById('responses').innerHTML = '';
+      document.getElementById('emptyState').style.display = 'none';
+      input.value = h.query;
+
+      AGENTS.forEach(agent => {
+        if (h.responses[agent.id]) {
+          addResponseCard(agent, h.responses[agent.id]);
+          showAgent(agent.id, 'done');
+        }
+      });
+      if (h.synthesis) addSynthesisCard(h.synthesis);
+      document.getElementById('historyPanel').style.display = 'none';
+    }
+  </script>
+</body>
+</html>
