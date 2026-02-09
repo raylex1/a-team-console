@@ -122,22 +122,23 @@ async function callAnthropic(systemPrompt, userMessage) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      max_tokens: 4096,
       system: systemPrompt,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{ role: 'user', content: userMessage }]
     })
   });
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  return data.content.map(b => b.text || '').join('\n');
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
 }
 
 async function callOpenAI(systemPrompt, userMessage) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -145,9 +146,9 @@ async function callOpenAI(systemPrompt, userMessage) {
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      max_tokens: 1000,
-      messages: [
-        { role: 'system', content: systemPrompt },
+      tools: [{ type: 'web_search_preview' }],
+      input: [
+        { role: 'developer', content: systemPrompt },
         { role: 'user', content: userMessage }
       ]
     })
@@ -155,7 +156,9 @@ async function callOpenAI(systemPrompt, userMessage) {
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  return data.choices[0].message.content;
+  const msg = data.output.find(o => o.type === 'message');
+  if (!msg) throw new Error('No message in OpenAI response');
+  return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
 }
 
 async function callGoogle(systemPrompt, userMessage) {
@@ -168,6 +171,7 @@ async function callGoogle(systemPrompt, userMessage) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userMessage }] }],
+      tools: [{ google_search: {} }],
       generationConfig: { maxOutputTokens: 1000 }
     })
   });
@@ -190,6 +194,7 @@ async function callXAI(systemPrompt, userMessage) {
     body: JSON.stringify({
       model: 'grok-3-mini-fast',
       max_tokens: 1000,
+      search: { mode: 'auto' },
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
