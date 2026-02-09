@@ -1,6 +1,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+const z = require('zod');
 const app = express();
 
 app.use(express.json());
@@ -25,7 +28,7 @@ app.post('/api/auth', (req, res) => {
 
 // Middleware: protect everything except /api/auth
 app.use((req, res, next) => {
-  if (req.path === '/api/auth') return next();
+  if (req.path === '/api/auth' || req.path === '/mcp') return next();
   if (!process.env.APP_PASSWORD) return next(); // no password set = open access
   const cookies = {};
   (req.headers.cookie || '').split(';').forEach(c => {
@@ -266,6 +269,121 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
     console.error('Synthesis error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- MCP Server (Streamable HTTP transport) ---
+function createMcpServer() {
+  const server = new McpServer({ name: 'a-team-console', version: '3.0.0' });
+
+  // Helper: call a single agent by ID
+  async function consultAgent(agentId, query) {
+    const agent = AGENTS[agentId];
+    const callFn = PROVIDERS[agent.provider];
+    const response = await callFn(agent.systemPrompt, query);
+    return response;
+  }
+
+  server.registerTool('consult_team', {
+    title: 'Consult A-Team',
+    description: 'Consult all 4 AI agents (Claude, ChatGPT, Gemini, Grok) and get a synthesis. Returns all 5 responses.',
+    inputSchema: z.object({ query: z.string().describe('The question or topic to consult the team about') })
+  }, async ({ query }) => {
+    const results = {};
+    const errors = {};
+    const agentIds = ['claude', 'chatgpt', 'gemini', 'grok'];
+    await Promise.all(agentIds.map(async (id) => {
+      try { results[id] = await consultAgent(id, query); }
+      catch (e) { errors[id] = e.message; }
+    }));
+
+    // Build prior-responses string for synthesis
+    const allResponses = agentIds
+      .filter(id => results[id])
+      .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${results[id]}`)
+      .join('\n\n');
+
+    // Synthesis via Claude
+    let synthesis = '';
+    try {
+      const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
+- Identifies where the team agrees
+- Highlights the most important disagreements
+- Gives your architectural recommendation as team lead
+- Is honest about remaining uncertainties
+
+Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
+      synthesis = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
+    } catch (e) { synthesis = `Synthesis error: ${e.message}`; }
+
+    const parts = agentIds.map(id => {
+      const header = `## ${AGENTS[id].name} (${AGENTS[id].role})`;
+      return results[id] ? `${header}\n${results[id]}` : `${header}\nError: ${errors[id]}`;
+    });
+    parts.push(`## Synthesis\n${synthesis}`);
+
+    return { content: [{ type: 'text', text: parts.join('\n\n') }] };
+  });
+
+  server.registerTool('consult_claude', {
+    title: 'Consult Claude',
+    description: 'Consult Claude (Anthropic) — Principal Architect & Team Lead',
+    inputSchema: z.object({ query: z.string().describe('The question to ask Claude') })
+  }, async ({ query }) => {
+    const response = await consultAgent('claude', query);
+    return { content: [{ type: 'text', text: response }] };
+  });
+
+  server.registerTool('consult_chatgpt', {
+    title: 'Consult ChatGPT',
+    description: 'Consult ChatGPT (OpenAI) — Financial Research Analyst',
+    inputSchema: z.object({ query: z.string().describe('The question to ask ChatGPT') })
+  }, async ({ query }) => {
+    const response = await consultAgent('chatgpt', query);
+    return { content: [{ type: 'text', text: response }] };
+  });
+
+  server.registerTool('consult_gemini', {
+    title: 'Consult Gemini',
+    description: 'Consult Gemini (Google) — Data Analyst & Ranker',
+    inputSchema: z.object({ query: z.string().describe('The question to ask Gemini') })
+  }, async ({ query }) => {
+    const response = await consultAgent('gemini', query);
+    return { content: [{ type: 'text', text: response }] };
+  });
+
+  server.registerTool('consult_grok', {
+    title: 'Consult Grok',
+    description: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst",
+    inputSchema: z.object({ query: z.string().describe('The question to ask Grok') })
+  }, async ({ query }) => {
+    const response = await consultAgent('grok', query);
+    return { content: [{ type: 'text', text: response }] };
+  });
+
+  return server;
+}
+
+app.post('/mcp', async (req, res) => {
+  const server = createMcpServer();
+  try {
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    res.on('close', () => { transport.close(); server.close(); });
+  } catch (err) {
+    console.error('MCP error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+    }
+  }
+});
+
+app.get('/mcp', (req, res) => {
+  res.writeHead(405).end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
+});
+
+app.delete('/mcp', (req, res) => {
+  res.writeHead(405).end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
 });
 
 // Serve frontend
