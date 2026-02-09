@@ -188,26 +188,27 @@ async function callXAI(systemPrompt, userMessage) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error('XAI_API_KEY not configured');
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
+  const res = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: 'grok-3-mini-fast',
-      max_tokens: 1000,
-      search: { mode: 'auto' },
-      messages: [
+      model: 'grok-4-1-fast-non-reasoning',
+      input: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
-      ]
+      ],
+      tools: [{ type: 'web_search' }]
     })
   });
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  return data.choices[0].message.content;
+  const msg = data.output.find(o => o.type === 'message');
+  if (!msg) throw new Error('No message in xAI response');
+  return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
 }
 
 // Provider routing (quick mode — used by web UI)
