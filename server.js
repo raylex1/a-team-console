@@ -1,8 +1,44 @@
 const express = require('express');
+const crypto = require('crypto');
 const path = require('path');
 const app = express();
 
 app.use(express.json());
+
+// --- Password gate ---
+const AUTH_SECRET = crypto.randomBytes(32).toString('hex');
+
+function makeToken() {
+  return crypto.createHmac('sha256', AUTH_SECRET).update(process.env.APP_PASSWORD || '').digest('hex');
+}
+
+// Auth endpoint
+app.post('/api/auth', (req, res) => {
+  const { password } = req.body;
+  if (!process.env.APP_PASSWORD) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
+  if (password === process.env.APP_PASSWORD) {
+    res.cookie('auth_token', makeToken(), { httpOnly: true, sameSite: 'strict', maxAge: 24 * 60 * 60 * 1000 });
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: 'Wrong password' });
+});
+
+// Middleware: protect everything except /api/auth
+app.use((req, res, next) => {
+  if (req.path === '/api/auth') return next();
+  if (!process.env.APP_PASSWORD) return next(); // no password set = open access
+  const cookies = {};
+  (req.headers.cookie || '').split(';').forEach(c => {
+    const [k, v] = c.trim().split('=');
+    if (k) cookies[k] = v;
+  });
+  if (cookies.auth_token === makeToken()) return next();
+  // For API calls, return 401
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+  // For page loads, serve the login page
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Agent configurations with their real API endpoints

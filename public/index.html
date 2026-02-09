@@ -266,6 +266,50 @@
     .history-query { font-size: 13px; color: #E2E8F0; margin-bottom: 4px; }
     .history-meta { font-size: 11px; color: #64748B; }
 
+    /* Password gate overlay */
+    .auth-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: linear-gradient(145deg, #0C0C1D 0%, #1A1A2E 40%, #16213E 100%);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .auth-overlay.hidden { display: none; }
+    .auth-box {
+      text-align: center; padding: 40px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px; width: 360px;
+    }
+    .auth-box .logo { margin: 0 auto 16px; }
+    .auth-box h2 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px; font-weight: 700; margin-bottom: 6px;
+      background: linear-gradient(135deg, #F59E0B, #EF4444, #3B82F6, #10B981);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .auth-box p { font-size: 12px; color: #64748B; margin-bottom: 24px; }
+    .auth-input {
+      width: 100%; padding: 12px 16px; border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #E2E8F0; font-family: 'JetBrains Mono', monospace;
+      font-size: 14px; outline: none; margin-bottom: 12px;
+    }
+    .auth-input:focus {
+      border-color: rgba(245,158,11,0.5);
+      box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
+    }
+    .auth-submit {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #F59E0B, #D97706);
+      color: #000; border: none; border-radius: 10px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 14px; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .auth-submit:hover { box-shadow: 0 4px 20px rgba(245,158,11,0.3); }
+    .auth-error { color: #FCA5A5; font-size: 12px; margin-top: 12px; }
+
     @media (max-width: 768px) {
       .roster { grid-template-columns: repeat(2, 1fr); }
       .header-title { font-size: 20px; }
@@ -273,6 +317,18 @@
   </style>
 </head>
 <body>
+  <!-- Password Gate -->
+  <div id="authOverlay" class="auth-overlay">
+    <div class="auth-box">
+      <div class="logo">A</div>
+      <h2>A-TEAM CONSOLE</h2>
+      <p>Enter password to access</p>
+      <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="off">
+      <button id="authSubmit" class="auth-submit" onclick="submitAuth()">ENTER</button>
+      <div id="authError" class="auth-error"></div>
+    </div>
+  </div>
+
   <div class="header">
     <div class="header-left">
       <div class="logo">A</div>
@@ -372,6 +428,36 @@
   </div>
 
   <script>
+    // --- Auth gate ---
+    async function submitAuth() {
+      const pw = document.getElementById('authPassword').value;
+      const errEl = document.getElementById('authError');
+      errEl.textContent = '';
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          document.getElementById('authOverlay').classList.add('hidden');
+          checkHealth();
+        } else {
+          errEl.textContent = data.error || 'Wrong password';
+        }
+      } catch { errEl.textContent = 'Connection error'; }
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('authPassword').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitAuth();
+      });
+      // Check if already authenticated
+      fetch('/api/health').then(r => {
+        if (r.ok) document.getElementById('authOverlay').classList.add('hidden');
+      }).catch(() => {});
+    });
+
     const AGENTS = [
       { id: 'claude', name: 'Claude', role: 'Principal Architect & Team Lead', color: '#D97706', provider: 'Anthropic' },
       { id: 'chatgpt', name: 'ChatGPT', role: 'Financial Research Analyst', color: '#059669', provider: 'OpenAI' },
