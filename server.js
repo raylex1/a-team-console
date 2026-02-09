@@ -424,6 +424,21 @@ const DEEP_PROVIDERS = {
   xai: callXAIDeep
 };
 
+// Model name maps for fallback notifications
+const DEEP_MODEL_NAMES = {
+  anthropic: 'Claude Opus 4.6',
+  openai: 'o3-deep-research',
+  google: 'Gemini Deep Research',
+  xai: 'Grok 4.1 Fast'
+};
+
+const QUICK_MODEL_NAMES = {
+  anthropic: 'Claude Sonnet 4',
+  openai: 'GPT-4o Mini',
+  google: 'Gemini 2.5 Flash Lite',
+  xai: 'Grok 4.1 Fast Non-Reasoning'
+};
+
 // Health check
 app.get('/api/health', (req, res) => {
   const keys = {
@@ -503,6 +518,7 @@ function startDeepJob(toolName, query, agentIds) {
     agentIds,
     results: {},
     errors: {},
+    modes: {},
     synthesis: null,
     createdAt: Date.now(),
     completedAt: null
@@ -512,16 +528,27 @@ function startDeepJob(toolName, query, agentIds) {
   // Fire and forget — runs in background
   (async () => {
     try {
-      // Call all requested agents in parallel
+      // Call all requested agents in parallel (deep → quick fallback)
       await Promise.all(agentIds.map(async (id) => {
+        const agent = AGENTS[id];
         try {
-          const agent = AGENTS[id];
           const callFn = DEEP_PROVIDERS[agent.provider];
           job.results[id] = await callFn(agent.systemPrompt, query);
-          console.log(`Job ${jobId}: ${id} completed`);
-        } catch (e) {
-          job.errors[id] = e.message;
-          console.log(`Job ${jobId}: ${id} failed: ${e.message}`);
+          job.modes[id] = 'deep';
+          console.log(`Job ${jobId}: ${id} completed (deep)`);
+        } catch (deepErr) {
+          console.log(`Job ${jobId}: ${id} deep failed: ${deepErr.message}, falling back to quick`);
+          try {
+            const quickFn = PROVIDERS[agent.provider];
+            job.results[id] = await quickFn(agent.systemPrompt, query);
+            job.modes[id] = 'fallback';
+            job.errors[id] = deepErr.message;
+            console.log(`Job ${jobId}: ${id} completed (fallback to quick)`);
+          } catch (quickErr) {
+            job.modes[id] = 'failed';
+            job.errors[id] = `Deep: ${deepErr.message} | Quick: ${quickErr.message}`;
+            console.log(`Job ${jobId}: ${id} both failed: ${quickErr.message}`);
+          }
         }
       }));
 
@@ -557,18 +584,28 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
   return jobId;
 }
 
-// Format a completed job into a text response
+// Format a completed job into a text response with mode indicators
 function formatJobResults(job) {
   const parts = job.agentIds.map(id => {
-    const header = `## ${AGENTS[id].name} (${AGENTS[id].role})`;
-    return job.results[id] ? `${header}\n${job.results[id]}` : `${header}\nError: ${job.errors[id] || 'No response'}`;
+    const agent = AGENTS[id];
+    const header = `## ${agent.name} (${agent.role})`;
+    const mode = job.modes[id];
+    if (mode === 'failed' || !job.results[id]) {
+      return `${header}\n❌ FAILED: ${job.errors[id] || 'No response'}`;
+    }
+    if (mode === 'fallback') {
+      const quickModel = QUICK_MODEL_NAMES[agent.provider];
+      return `${header}\n⚠️ Fell back to quick mode — Reason: ${job.errors[id]}\n🔄 Using: ${quickModel}\n\n${job.results[id]}`;
+    }
+    const deepModel = DEEP_MODEL_NAMES[agent.provider];
+    return `${header}\n🔬 Deep Research (${deepModel})\n\n${job.results[id]}`;
   });
   if (job.synthesis) parts.push(`## Synthesis\n${job.synthesis}`);
   return parts.join('\n\n');
 }
 
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '4.1.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.0.0' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -679,9 +716,14 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
       progress += '\n\n';
 
       for (const id of job.agentIds) {
-        if (job.results[id]) progress += `- ${AGENTS[id].name}: Done\n`;
-        else if (job.errors[id]) progress += `- ${AGENTS[id].name}: Failed (${job.errors[id].substring(0, 80)})\n`;
-        else progress += `- ${AGENTS[id].name}: Researching...\n`;
+        if (job.results[id]) {
+          const modeLabel = job.modes[id] === 'fallback' ? '⚠️ Fell back to quick' : '🔬 Deep';
+          progress += `- ${AGENTS[id].name}: Done (${modeLabel})\n`;
+        } else if (job.modes[id] === 'failed') {
+          progress += `- ${AGENTS[id].name}: ❌ Failed\n`;
+        } else {
+          progress += `- ${AGENTS[id].name}: Researching...\n`;
+        }
       }
 
       if (job.agentIds.length > 1) progress += `- Synthesis: Waiting for all agents\n`;
@@ -732,7 +774,7 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v4.0 running on port ${PORT}`);
+  console.log(`A-Team Console v5.0 running on port ${PORT}`);
   console.log('Providers configured:', {
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai: !!process.env.OPENAI_API_KEY,
