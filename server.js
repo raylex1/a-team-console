@@ -478,33 +478,126 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
 });
 
 // --- MCP Server (Streamable HTTP transport) ---
-const modeSchema = z.enum(['quick', 'deep']).default('deep').describe('quick = fast models, deep = deep research with extended thinking and web research (default)');
+
+// In-memory job store for async deep research
+const deepJobs = new Map();
+
+// Clean up jobs older than 1 hour
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [id, job] of deepJobs) {
+    if (job.createdAt < cutoff) deepJobs.delete(id);
+  }
+}, 10 * 60 * 1000);
+
+const modeSchema = z.enum(['quick', 'deep']).default('deep').describe('quick = fast models (immediate response), deep = deep research with extended thinking and web search (returns job ID, poll with get_research_results)');
+
+// Run a deep research job in the background (fire-and-forget)
+function startDeepJob(toolName, query, agentIds) {
+  const jobId = crypto.randomUUID();
+  const job = {
+    id: jobId,
+    tool: toolName,
+    query,
+    status: 'researching',
+    agentIds,
+    results: {},
+    errors: {},
+    synthesis: null,
+    createdAt: Date.now(),
+    completedAt: null
+  };
+  deepJobs.set(jobId, job);
+
+  // Fire and forget — runs in background
+  (async () => {
+    try {
+      // Call all requested agents in parallel
+      await Promise.all(agentIds.map(async (id) => {
+        try {
+          const agent = AGENTS[id];
+          const callFn = DEEP_PROVIDERS[agent.provider];
+          job.results[id] = await callFn(agent.systemPrompt, query);
+          console.log(`Job ${jobId}: ${id} completed`);
+        } catch (e) {
+          job.errors[id] = e.message;
+          console.log(`Job ${jobId}: ${id} failed: ${e.message}`);
+        }
+      }));
+
+      // If team consult, run synthesis
+      if (agentIds.length > 1) {
+        const allResponses = agentIds
+          .filter(id => job.results[id])
+          .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${job.results[id]}`)
+          .join('\n\n');
+        try {
+          const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
+- Identifies where the team agrees
+- Highlights the most important disagreements
+- Gives your architectural recommendation as team lead
+- Is honest about remaining uncertainties
+
+Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
+          job.synthesis = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
+        } catch (e) { job.synthesis = `Synthesis error: ${e.message}`; }
+      }
+
+      job.status = 'completed';
+      job.completedAt = Date.now();
+      const elapsed = ((job.completedAt - job.createdAt) / 1000).toFixed(1);
+      console.log(`Job ${jobId}: completed in ${elapsed}s`);
+    } catch (e) {
+      job.status = 'failed';
+      job.completedAt = Date.now();
+      console.error(`Job ${jobId}: fatal error:`, e.message);
+    }
+  })();
+
+  return jobId;
+}
+
+// Format a completed job into a text response
+function formatJobResults(job) {
+  const parts = job.agentIds.map(id => {
+    const header = `## ${AGENTS[id].name} (${AGENTS[id].role})`;
+    return job.results[id] ? `${header}\n${job.results[id]}` : `${header}\nError: ${job.errors[id] || 'No response'}`;
+  });
+  if (job.synthesis) parts.push(`## Synthesis\n${job.synthesis}`);
+  return parts.join('\n\n');
+}
 
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '4.0.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '4.1.0' });
 
-  // Helper: call a single agent by ID, respecting mode
-  async function consultAgent(agentId, query, mode) {
+  // Helper: call a single agent synchronously (quick mode only)
+  async function consultAgentQuick(agentId, query) {
     const agent = AGENTS[agentId];
-    const providers = mode === 'deep' ? DEEP_PROVIDERS : PROVIDERS;
-    const callFn = providers[agent.provider];
+    const callFn = PROVIDERS[agent.provider];
     return callFn(agent.systemPrompt, query);
   }
 
+  // --- consult_team ---
   server.registerTool('consult_team', {
     title: 'Consult A-Team',
-    description: 'Consult all 4 AI agents (Claude, ChatGPT, Gemini, Grok) and get a synthesis. Returns all 5 responses. Deep mode uses extended thinking, deep research, and web search — may take several minutes.',
+    description: 'Consult all 4 AI agents (Claude, ChatGPT, Gemini, Grok) and get a synthesis. Quick mode returns immediately. Deep mode starts background research and returns a job_id — use get_research_results to retrieve results.',
     inputSchema: z.object({
       query: z.string().describe('The question or topic to consult the team about'),
       mode: modeSchema
     })
   }, async ({ query, mode }) => {
-    console.log(`consult_team called in ${mode} mode`);
+    if (mode === 'deep') {
+      const jobId = startDeepJob('consult_team', query, ['claude', 'chatgpt', 'gemini', 'grok']);
+      return { content: [{ type: 'text', text: `Deep research started. Job ID: ${jobId}\n\nAll 4 agents (Claude, ChatGPT, Gemini, Grok) are researching in background. This typically takes 5-10 minutes.\n\nUse get_research_results with job_id "${jobId}" to check progress and retrieve results.` }] };
+    }
+
+    // Quick mode — synchronous
+    console.log('consult_team called in quick mode');
     const results = {};
     const errors = {};
     const agentIds = ['claude', 'chatgpt', 'gemini', 'grok'];
     await Promise.all(agentIds.map(async (id) => {
-      try { results[id] = await consultAgent(id, query, mode); }
+      try { results[id] = await consultAgentQuick(id, query); }
       catch (e) { errors[id] = e.message; }
     }));
 
@@ -513,7 +606,6 @@ function createMcpServer() {
       .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${results[id]}`)
       .join('\n\n');
 
-    // Synthesis always uses quick Claude (summarizing, not researching)
     let synthesis = '';
     try {
       const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
@@ -531,56 +623,80 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
       return results[id] ? `${header}\n${results[id]}` : `${header}\nError: ${errors[id]}`;
     });
     parts.push(`## Synthesis\n${synthesis}`);
-
     return { content: [{ type: 'text', text: parts.join('\n\n') }] };
   });
 
-  server.registerTool('consult_claude', {
-    title: 'Consult Claude',
-    description: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with extended thinking and web search.',
-    inputSchema: z.object({
-      query: z.string().describe('The question to ask Claude'),
-      mode: modeSchema
-    })
-  }, async ({ query, mode }) => {
-    const response = await consultAgent('claude', query, mode);
-    return { content: [{ type: 'text', text: response }] };
-  });
+  // --- Individual agent tools ---
+  const agentTools = [
+    { id: 'claude', tool: 'consult_claude', title: 'Consult Claude', desc: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with extended thinking and web search.' },
+    { id: 'chatgpt', tool: 'consult_chatgpt', title: 'Consult ChatGPT', desc: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research with background web research.' },
+    { id: 'gemini', tool: 'consult_gemini', title: 'Consult Gemini', desc: 'Consult Gemini (Google) — Data Analyst & Ranker. Deep mode uses Gemini Deep Research agent.' },
+    { id: 'grok', tool: 'consult_grok', title: 'Consult Grok', desc: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast with agentic web search." }
+  ];
 
-  server.registerTool('consult_chatgpt', {
-    title: 'Consult ChatGPT',
-    description: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research with background web research — may take several minutes.',
-    inputSchema: z.object({
-      query: z.string().describe('The question to ask ChatGPT'),
-      mode: modeSchema
-    })
-  }, async ({ query, mode }) => {
-    const response = await consultAgent('chatgpt', query, mode);
-    return { content: [{ type: 'text', text: response }] };
-  });
+  for (const at of agentTools) {
+    server.registerTool(at.tool, {
+      title: at.title,
+      description: at.desc + ' Quick mode returns immediately. Deep mode returns a job_id — use get_research_results to retrieve results.',
+      inputSchema: z.object({
+        query: z.string().describe(`The question to ask ${AGENTS[at.id].name}`),
+        mode: modeSchema
+      })
+    }, async ({ query, mode }) => {
+      if (mode === 'deep') {
+        const jobId = startDeepJob(at.tool, query, [at.id]);
+        return { content: [{ type: 'text', text: `Deep research started. Job ID: ${jobId}\n\n${AGENTS[at.id].name} is researching in background. This may take a few minutes.\n\nUse get_research_results with job_id "${jobId}" to check progress and retrieve results.` }] };
+      }
+      const response = await consultAgentQuick(at.id, query);
+      return { content: [{ type: 'text', text: response }] };
+    });
+  }
 
-  server.registerTool('consult_gemini', {
-    title: 'Consult Gemini',
-    description: 'Consult Gemini (Google) — Data Analyst & Ranker. Deep mode uses Gemini Deep Research agent — may take several minutes.',
+  // --- get_research_results ---
+  server.registerTool('get_research_results', {
+    title: 'Get Research Results',
+    description: 'Check the status of a deep research job and retrieve results when ready. Use the job_id returned by any consult tool in deep mode.',
     inputSchema: z.object({
-      query: z.string().describe('The question to ask Gemini'),
-      mode: modeSchema
+      job_id: z.string().describe('The job ID returned by a deep mode consult tool')
     })
-  }, async ({ query, mode }) => {
-    const response = await consultAgent('gemini', query, mode);
-    return { content: [{ type: 'text', text: response }] };
-  });
+  }, async ({ job_id }) => {
+    const job = deepJobs.get(job_id);
+    if (!job) {
+      return { content: [{ type: 'text', text: `Job not found: ${job_id}\n\nThe job may have expired (results are kept for 1 hour) or the server may have restarted.` }] };
+    }
 
-  server.registerTool('consult_grok', {
-    title: 'Consult Grok',
-    description: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast with agentic web search.",
-    inputSchema: z.object({
-      query: z.string().describe('The question to ask Grok'),
-      mode: modeSchema
-    })
-  }, async ({ query, mode }) => {
-    const response = await consultAgent('grok', query, mode);
-    return { content: [{ type: 'text', text: response }] };
+    if (job.status === 'researching') {
+      const elapsed = ((Date.now() - job.createdAt) / 1000).toFixed(0);
+      const done = Object.keys(job.results).length;
+      const failed = Object.keys(job.errors).length;
+      const total = job.agentIds.length;
+      const pending = total - done - failed;
+
+      let progress = `Research in progress (${elapsed}s elapsed)\n\n`;
+      progress += `Agents: ${done}/${total} completed`;
+      if (failed > 0) progress += `, ${failed} failed`;
+      if (pending > 0) progress += `, ${pending} still working`;
+      progress += '\n\n';
+
+      for (const id of job.agentIds) {
+        if (job.results[id]) progress += `- ${AGENTS[id].name}: Done\n`;
+        else if (job.errors[id]) progress += `- ${AGENTS[id].name}: Failed (${job.errors[id].substring(0, 80)})\n`;
+        else progress += `- ${AGENTS[id].name}: Researching...\n`;
+      }
+
+      if (job.agentIds.length > 1) progress += `- Synthesis: Waiting for all agents\n`;
+      progress += `\nCheck again in a minute or two.`;
+
+      return { content: [{ type: 'text', text: progress }] };
+    }
+
+    if (job.status === 'completed') {
+      const elapsed = ((job.completedAt - job.createdAt) / 1000).toFixed(1);
+      const header = `Deep research completed in ${elapsed}s\nTool: ${job.tool} | Query: "${job.query.substring(0, 100)}"\n\n`;
+      return { content: [{ type: 'text', text: header + formatJobResults(job) }] };
+    }
+
+    return { content: [{ type: 'text', text: `Job ${job_id} status: ${job.status}` }] };
   });
 
   return server;
