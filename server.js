@@ -210,12 +210,217 @@ async function callXAI(systemPrompt, userMessage) {
   return data.choices[0].message.content;
 }
 
-// Provider routing
+// Provider routing (quick mode — used by web UI)
 const PROVIDERS = {
   anthropic: callAnthropic,
   openai: callOpenAI,
   google: callGoogle,
   xai: callXAI
+};
+
+// --- Deep Research call functions (used by MCP tools) ---
+
+async function callAnthropicDeep(systemPrompt, userMessage) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+
+  async function tryModel(model) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      signal: AbortSignal.timeout(120000),
+      body: JSON.stringify({
+        model,
+        max_tokens: 16000,
+        thinking: { type: 'enabled', budget_tokens: 10000 },
+        system: systemPrompt,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+        messages: [{ role: 'user', content: userMessage }]
+      })
+    });
+    return res.json();
+  }
+
+  let data = await tryModel('claude-opus-4-6');
+  if (data.error) {
+    console.log('Opus unavailable, falling back to Sonnet 4.5:', data.error.message);
+    data = await tryModel('claude-sonnet-4-5-20250929');
+    if (data.error) throw new Error(data.error.message);
+  }
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+}
+
+async function callOpenAIDeep(systemPrompt, userMessage) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+
+  try {
+    // Create background deep research request
+    const createRes = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'o3-deep-research',
+        input: [
+          { role: 'developer', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        background: true,
+        tools: [{ type: 'web_search_preview' }]
+      })
+    });
+
+    const createData = await createRes.json();
+    if (createData.error) throw new Error(createData.error.message);
+    const responseId = createData.id;
+    console.log(`OpenAI deep research started: ${responseId}`);
+
+    // Poll every 10s, max 10 minutes
+    const startTime = Date.now();
+    while (Date.now() - startTime < 10 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 10000));
+      const pollRes = await fetch(`https://api.openai.com/v1/responses/${responseId}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const poll = await pollRes.json();
+      if (poll.error) throw new Error(poll.error.message);
+
+      if (poll.status === 'completed') {
+        const msg = poll.output.filter(o => o.type === 'message').pop();
+        if (!msg) throw new Error('No message in deep research output');
+        return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
+      }
+      if (poll.status === 'failed') throw new Error('Deep research failed');
+      if (poll.status === 'incomplete') {
+        const msg = poll.output.filter(o => o.type === 'message').pop();
+        if (msg) return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n') + '\n\n[Deep research incomplete]';
+        throw new Error('Deep research incomplete with no output');
+      }
+      if (poll.status !== 'queued' && poll.status !== 'in_progress') {
+        throw new Error(`Unexpected status: ${poll.status}`);
+      }
+      console.log(`OpenAI deep research polling... status: ${poll.status}`);
+    }
+    throw new Error('Deep research timed out after 10 minutes');
+  } catch (err) {
+    // Fallback to gpt-4o with web search
+    console.log('OpenAI deep research failed, falling back to gpt-4o:', err.message);
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        tools: [{ type: 'web_search_preview' }],
+        input: [
+          { role: 'developer', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const msg = data.output.find(o => o.type === 'message');
+    if (!msg) throw new Error('No message in OpenAI fallback response');
+    return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
+  }
+}
+
+async function callGoogleDeep(systemPrompt, userMessage) {
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not configured');
+
+  try {
+    // Create deep research via Interactions API
+    const createRes = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
+      body: JSON.stringify({
+        agent: 'deep-research-pro-preview-12-2025',
+        input: systemPrompt + '\n\n' + userMessage,
+        background: true
+      })
+    });
+
+    const createData = await createRes.json();
+    if (createData.error) throw new Error(createData.error.message);
+    const interactionId = createData.id;
+    console.log(`Google deep research started: ${interactionId}`);
+
+    // Poll every 10s, max 10 minutes
+    const startTime = Date.now();
+    while (Date.now() - startTime < 10 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 10000));
+      const pollRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/interactions/${interactionId}`,
+        { headers: { 'x-goog-api-key': apiKey } }
+      );
+      const poll = await pollRes.json();
+      if (poll.error) throw new Error(poll.error.message);
+
+      if (poll.status === 'completed') {
+        if (!poll.outputs || !poll.outputs.length) throw new Error('No outputs in deep research');
+        return poll.outputs.filter(o => o.type === 'text').map(o => o.text).join('\n');
+      }
+      if (poll.status === 'failed' || poll.status === 'cancelled') {
+        throw new Error(`Deep research ${poll.status}`);
+      }
+      console.log(`Google deep research polling... status: ${poll.status}`);
+    }
+    throw new Error('Deep research timed out after 10 minutes');
+  } catch (err) {
+    // Fallback to gemini-2.5-flash-lite with Google Search grounding
+    console.log('Google deep research failed, falling back to gemini-2.5-flash-lite:', err.message);
+    return callGoogle(systemPrompt, userMessage);
+  }
+}
+
+async function callXAIDeep(systemPrompt, userMessage) {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) throw new Error('XAI_API_KEY not configured');
+
+  const res = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({
+      model: 'grok-4-1-fast',
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage }
+      ],
+      tools: [{ type: 'web_search' }]
+    })
+  });
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  const msg = data.output.find(o => o.type === 'message');
+  if (!msg) throw new Error('No message in xAI response');
+  return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
+}
+
+// Deep provider routing (used by MCP tools in deep mode)
+const DEEP_PROVIDERS = {
+  anthropic: callAnthropicDeep,
+  openai: callOpenAIDeep,
+  google: callGoogleDeep,
+  xai: callXAIDeep
 };
 
 // Health check
@@ -272,37 +477,42 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
 });
 
 // --- MCP Server (Streamable HTTP transport) ---
-function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '3.0.0' });
+const modeSchema = z.enum(['quick', 'deep']).default('deep').describe('quick = fast models, deep = deep research with extended thinking and web research (default)');
 
-  // Helper: call a single agent by ID
-  async function consultAgent(agentId, query) {
+function createMcpServer() {
+  const server = new McpServer({ name: 'a-team-console', version: '4.0.0' });
+
+  // Helper: call a single agent by ID, respecting mode
+  async function consultAgent(agentId, query, mode) {
     const agent = AGENTS[agentId];
-    const callFn = PROVIDERS[agent.provider];
-    const response = await callFn(agent.systemPrompt, query);
-    return response;
+    const providers = mode === 'deep' ? DEEP_PROVIDERS : PROVIDERS;
+    const callFn = providers[agent.provider];
+    return callFn(agent.systemPrompt, query);
   }
 
   server.registerTool('consult_team', {
     title: 'Consult A-Team',
-    description: 'Consult all 4 AI agents (Claude, ChatGPT, Gemini, Grok) and get a synthesis. Returns all 5 responses.',
-    inputSchema: z.object({ query: z.string().describe('The question or topic to consult the team about') })
-  }, async ({ query }) => {
+    description: 'Consult all 4 AI agents (Claude, ChatGPT, Gemini, Grok) and get a synthesis. Returns all 5 responses. Deep mode uses extended thinking, deep research, and web search — may take several minutes.',
+    inputSchema: z.object({
+      query: z.string().describe('The question or topic to consult the team about'),
+      mode: modeSchema
+    })
+  }, async ({ query, mode }) => {
+    console.log(`consult_team called in ${mode} mode`);
     const results = {};
     const errors = {};
     const agentIds = ['claude', 'chatgpt', 'gemini', 'grok'];
     await Promise.all(agentIds.map(async (id) => {
-      try { results[id] = await consultAgent(id, query); }
+      try { results[id] = await consultAgent(id, query, mode); }
       catch (e) { errors[id] = e.message; }
     }));
 
-    // Build prior-responses string for synthesis
     const allResponses = agentIds
       .filter(id => results[id])
       .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${results[id]}`)
       .join('\n\n');
 
-    // Synthesis via Claude
+    // Synthesis always uses quick Claude (summarizing, not researching)
     let synthesis = '';
     try {
       const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
@@ -326,37 +536,49 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
 
   server.registerTool('consult_claude', {
     title: 'Consult Claude',
-    description: 'Consult Claude (Anthropic) — Principal Architect & Team Lead',
-    inputSchema: z.object({ query: z.string().describe('The question to ask Claude') })
-  }, async ({ query }) => {
-    const response = await consultAgent('claude', query);
+    description: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with extended thinking and web search.',
+    inputSchema: z.object({
+      query: z.string().describe('The question to ask Claude'),
+      mode: modeSchema
+    })
+  }, async ({ query, mode }) => {
+    const response = await consultAgent('claude', query, mode);
     return { content: [{ type: 'text', text: response }] };
   });
 
   server.registerTool('consult_chatgpt', {
     title: 'Consult ChatGPT',
-    description: 'Consult ChatGPT (OpenAI) — Financial Research Analyst',
-    inputSchema: z.object({ query: z.string().describe('The question to ask ChatGPT') })
-  }, async ({ query }) => {
-    const response = await consultAgent('chatgpt', query);
+    description: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research with background web research — may take several minutes.',
+    inputSchema: z.object({
+      query: z.string().describe('The question to ask ChatGPT'),
+      mode: modeSchema
+    })
+  }, async ({ query, mode }) => {
+    const response = await consultAgent('chatgpt', query, mode);
     return { content: [{ type: 'text', text: response }] };
   });
 
   server.registerTool('consult_gemini', {
     title: 'Consult Gemini',
-    description: 'Consult Gemini (Google) — Data Analyst & Ranker',
-    inputSchema: z.object({ query: z.string().describe('The question to ask Gemini') })
-  }, async ({ query }) => {
-    const response = await consultAgent('gemini', query);
+    description: 'Consult Gemini (Google) — Data Analyst & Ranker. Deep mode uses Gemini Deep Research agent — may take several minutes.',
+    inputSchema: z.object({
+      query: z.string().describe('The question to ask Gemini'),
+      mode: modeSchema
+    })
+  }, async ({ query, mode }) => {
+    const response = await consultAgent('gemini', query, mode);
     return { content: [{ type: 'text', text: response }] };
   });
 
   server.registerTool('consult_grok', {
     title: 'Consult Grok',
-    description: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst",
-    inputSchema: z.object({ query: z.string().describe('The question to ask Grok') })
-  }, async ({ query }) => {
-    const response = await consultAgent('grok', query);
+    description: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast with agentic web search.",
+    inputSchema: z.object({
+      query: z.string().describe('The question to ask Grok'),
+      mode: modeSchema
+    })
+  }, async ({ query, mode }) => {
+    const response = await consultAgent('grok', query, mode);
     return { content: [{ type: 'text', text: response }] };
   });
 
@@ -392,12 +614,16 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`A-Team Console v3.0 running on port ${PORT}`);
+const httpServer = app.listen(PORT, () => {
+  console.log(`A-Team Console v4.0 running on port ${PORT}`);
   console.log('Providers configured:', {
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai: !!process.env.OPENAI_API_KEY,
     google: !!process.env.GOOGLE_AI_API_KEY,
     xai: !!process.env.XAI_API_KEY
   });
+  console.log('MCP endpoint: /mcp (deep research mode available)');
 });
+// 15 minute timeout to accommodate deep research polling
+httpServer.timeout = 15 * 60 * 1000;
+httpServer.headersTimeout = 15 * 60 * 1000 + 1000;
