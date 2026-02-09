@@ -122,10 +122,14 @@
 
     .query-footer {
       display: flex; justify-content: space-between;
-      align-items: center; margin-top: 10px;
+      align-items: center; margin-top: 10px; gap: 12px;
     }
 
     .query-hint { font-size: 11px; color: #475569; }
+
+    .query-controls {
+      display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    }
 
     .run-btn {
       background: linear-gradient(135deg, #F59E0B, #D97706);
@@ -310,9 +314,85 @@
     .auth-submit:hover { box-shadow: 0 4px 20px rgba(245,158,11,0.3); }
     .auth-error { color: #FCA5A5; font-size: 12px; margin-top: 12px; }
 
+    /* Mode toggle */
+    .mode-toggle {
+      display: inline-flex; align-items: center; position: relative;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px; padding: 3px;
+      cursor: pointer; user-select: none; transition: all 0.3s;
+    }
+    .mode-toggle.deep {
+      border-color: rgba(217,119,6,0.5);
+      box-shadow: 0 0 15px rgba(217,119,6,0.15), 0 0 4px rgba(217,119,6,0.1);
+    }
+    .mode-slider {
+      position: absolute; top: 3px; left: 3px;
+      height: calc(100% - 6px); border-radius: 20px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      background: rgba(255,255,255,0.1);
+    }
+    .mode-toggle.deep .mode-slider {
+      background: linear-gradient(135deg, #D97706, #F59E0B);
+    }
+    .mode-opt {
+      padding: 6px 14px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.5px; font-family: 'Space Grotesk', sans-serif;
+      z-index: 1; position: relative; transition: color 0.3s;
+      color: #64748B; white-space: nowrap;
+    }
+    .mode-opt.active { color: #E2E8F0; }
+    .mode-toggle.deep .mode-opt.active { color: #000; }
+
+    /* Confirmation dialog */
+    .confirm-overlay {
+      position: fixed; inset: 0; z-index: 9998;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .confirm-box {
+      background: linear-gradient(145deg, #1A1A2E, #16213E);
+      border: 1px solid rgba(217,119,6,0.3);
+      border-radius: 16px; padding: 32px; max-width: 420px;
+      text-align: center; box-shadow: 0 0 40px rgba(217,119,6,0.1);
+    }
+    .confirm-icon { font-size: 40px; margin-bottom: 12px; }
+    .confirm-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px; font-weight: 700; color: #F59E0B; margin-bottom: 8px;
+    }
+    .confirm-text {
+      font-size: 13px; color: #94A3B8; line-height: 1.6; margin-bottom: 24px;
+    }
+    .confirm-btns { display: flex; gap: 12px; justify-content: center; }
+    .confirm-no {
+      padding: 10px 24px; border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #94A3B8; font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s;
+    }
+    .confirm-no:hover { background: rgba(255,255,255,0.1); color: #E2E8F0; }
+    .confirm-yes {
+      padding: 10px 24px; border-radius: 10px;
+      background: linear-gradient(135deg, #D97706, #F59E0B);
+      border: none; color: #000; font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s;
+    }
+    .confirm-yes:hover { box-shadow: 0 4px 20px rgba(245,158,11,0.3); }
+
+    /* Deep timer */
+    .deep-timer {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px; font-weight: 600;
+      color: #F59E0B; letter-spacing: 1px;
+    }
+
     @media (max-width: 768px) {
       .roster { grid-template-columns: repeat(2, 1fr); }
       .header-title { font-size: 20px; }
+      .query-footer { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -326,6 +406,22 @@
       <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="off">
       <button id="authSubmit" class="auth-submit" onclick="submitAuth()">ENTER</button>
       <div id="authError" class="auth-error"></div>
+    </div>
+  </div>
+
+  <!-- Deep Research Confirmation Dialog -->
+  <div id="deepConfirm" class="confirm-overlay" style="display:none;">
+    <div class="confirm-box">
+      <div class="confirm-icon">&#x1F52C;</div>
+      <div class="confirm-title">Deep Research Mode</div>
+      <div class="confirm-text">
+        Deep research takes 5-15 minutes. Each agent will conduct thorough web research
+        with extended thinking and analysis. Continue?
+      </div>
+      <div class="confirm-btns">
+        <button class="confirm-no" onclick="cancelDeep()">Cancel</button>
+        <button class="confirm-yes" onclick="confirmDeep()">Start Deep Research</button>
+      </div>
     </div>
   </div>
 
@@ -394,8 +490,18 @@
       <textarea id="queryInput" class="query-input" rows="3"
         placeholder="Ask your A-Team a question... (Enter to send)"></textarea>
       <div class="query-footer">
-        <div class="query-hint" id="statusHint">4 real AI providers — each agent is a different brain</div>
-        <button id="runBtn" class="run-btn" onclick="runConsultation()">CONSULT A-TEAM</button>
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <div class="query-hint" id="statusHint">4 real AI providers — each agent is a different brain</div>
+          <span class="deep-timer" id="deepTimer" style="display:none;">0:00</span>
+        </div>
+        <div class="query-controls">
+          <div class="mode-toggle" id="modeToggle" onclick="toggleMode()">
+            <div class="mode-slider" id="modeSlider"></div>
+            <span class="mode-opt active" id="optQuick">Quick</span>
+            <span class="mode-opt" id="optDeep">Deep Research</span>
+          </div>
+          <button id="runBtn" class="run-btn" onclick="runConsultation()">CONSULT A-TEAM</button>
+        </div>
       </div>
     </div>
 
@@ -456,6 +562,8 @@
       fetch('/api/health').then(r => {
         if (r.ok) document.getElementById('authOverlay').classList.add('hidden');
       }).catch(() => {});
+      // Initialize mode toggle slider position
+      requestAnimationFrame(updateToggleUI);
     });
 
     const AGENTS = [
@@ -467,6 +575,49 @@
 
     let isRunning = false;
     let history = [];
+    let currentMode = 'quick';
+    let pendingDeepQuery = null;
+
+    // --- Mode Toggle ---
+    function toggleMode() {
+      if (isRunning) return;
+      currentMode = currentMode === 'quick' ? 'deep' : 'quick';
+      updateToggleUI();
+    }
+
+    function updateToggleUI() {
+      const toggle = document.getElementById('modeToggle');
+      const slider = document.getElementById('modeSlider');
+      const optQuick = document.getElementById('optQuick');
+      const optDeep = document.getElementById('optDeep');
+      const activeOpt = currentMode === 'deep' ? optDeep : optQuick;
+
+      slider.style.left = activeOpt.offsetLeft + 'px';
+      slider.style.width = activeOpt.offsetWidth + 'px';
+
+      if (currentMode === 'deep') {
+        toggle.classList.add('deep');
+        optQuick.classList.remove('active');
+        optDeep.classList.add('active');
+      } else {
+        toggle.classList.remove('deep');
+        optQuick.classList.add('active');
+        optDeep.classList.remove('active');
+      }
+    }
+
+    // --- Deep mode confirmation ---
+    function cancelDeep() {
+      document.getElementById('deepConfirm').style.display = 'none';
+      pendingDeepQuery = null;
+    }
+
+    async function confirmDeep() {
+      document.getElementById('deepConfirm').style.display = 'none';
+      const query = pendingDeepQuery;
+      pendingDeepQuery = null;
+      if (query) await runDeepConsultation(query);
+    }
 
     // Check API health on load
     async function checkHealth() {
@@ -517,6 +668,12 @@
       if (state === 'thinking') {
         card.classList.add('active');
         think.style.display = 'block';
+        think.textContent = 'THINKING...';
+        done.style.display = 'none';
+      } else if (state === 'researching') {
+        card.classList.add('active');
+        think.style.display = 'block';
+        think.textContent = '\u{1F52C} RESEARCHING...';
         done.style.display = 'none';
       } else if (state === 'done') {
         card.classList.remove('active');
@@ -529,10 +686,14 @@
       }
     }
 
-    function addResponseCard(agent, text) {
+    function addResponseCard(agent, text, modeTag) {
       const bgAlpha = agent.id === 'claude' ? '217,119,6' :
                        agent.id === 'chatgpt' ? '5,150,105' :
                        agent.id === 'gemini' ? '37,99,235' : '220,38,38';
+
+      const tagHtml = modeTag
+        ? `<span class="provider-tag" style="${modeTag === 'deep' ? 'color:#F59E0B;background:rgba(217,119,6,0.15);' : ''}">${modeTag === 'deep' ? '\u{1F52C} DEEP' : modeTag === 'fallback' ? '\u26A0\uFE0F FALLBACK' : agent.provider + ' API'}</span>`
+        : `<span class="provider-tag">${agent.provider} API</span>`;
 
       const card = document.createElement('div');
       card.className = 'response-card';
@@ -546,7 +707,7 @@
             <span class="response-name">${agent.name}</span>
             <span class="response-role">${agent.role}</span>
           </div>
-          <span class="provider-tag">${agent.provider} API</span>
+          ${tagHtml}
         </div>
         <div class="response-text">${escapeHtml(text)}</div>
       `;
@@ -574,10 +735,22 @@
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
+    // --- Main consultation dispatcher ---
     async function runConsultation() {
       const query = input.value.trim();
       if (!query || isRunning) return;
 
+      if (currentMode === 'deep') {
+        pendingDeepQuery = query;
+        document.getElementById('deepConfirm').style.display = 'flex';
+        return;
+      }
+
+      await runQuickConsultation(query);
+    }
+
+    // --- Quick mode (existing synchronous flow) ---
+    async function runQuickConsultation(query) {
       isRunning = true;
       document.getElementById('runBtn').disabled = true;
       document.getElementById('runBtn').textContent = 'CONSULTING...';
@@ -639,7 +812,113 @@
       isRunning = false;
       document.getElementById('runBtn').disabled = false;
       document.getElementById('runBtn').textContent = 'CONSULT A-TEAM';
-      document.getElementById('statusHint').textContent = '4 real AI providers — each agent is a different brain';
+      document.getElementById('statusHint').textContent = '4 real AI providers \u2014 each agent is a different brain';
+      AGENTS.forEach(a => showAgent(a.id, 'idle'));
+    }
+
+    // --- Deep Research mode (async with polling) ---
+    async function runDeepConsultation(query) {
+      isRunning = true;
+      document.getElementById('runBtn').disabled = true;
+      document.getElementById('runBtn').textContent = '\u{1F52C} DEEP RESEARCH...';
+      document.getElementById('responses').innerHTML = '';
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('errorBox').style.display = 'none';
+
+      // Show all agents as researching simultaneously
+      AGENTS.forEach(a => showAgent(a.id, 'researching'));
+
+      // Start elapsed timer
+      const startTime = Date.now();
+      const timerEl = document.getElementById('deepTimer');
+      timerEl.style.display = 'inline';
+      timerEl.textContent = '0:00';
+      const timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        timerEl.textContent = mins + ':' + String(secs).padStart(2, '0');
+      }, 1000);
+
+      document.getElementById('statusHint').textContent = '\u{1F52C} Deep research in progress \u2014 all 4 agents researching simultaneously...';
+
+      try {
+        // Start deep job
+        const res = await fetch('/api/consult', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mode: 'deep' })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        const jobId = data.jobId;
+
+        // Poll for results every 5 seconds
+        while (true) {
+          await new Promise(r => setTimeout(r, 5000));
+          const pollRes = await fetch('/api/results/' + jobId);
+          const poll = await pollRes.json();
+
+          if (poll.error) throw new Error(poll.error);
+
+          if (poll.status === 'researching') {
+            // Update individual agent statuses
+            let doneCount = 0;
+            for (const agent of AGENTS) {
+              const p = poll.progress[agent.id];
+              if (p && p.status === 'done') {
+                showAgent(agent.id, 'done');
+                doneCount++;
+              } else if (p && p.status === 'failed') {
+                showAgent(agent.id, 'done');
+                doneCount++;
+              }
+            }
+            document.getElementById('statusHint').textContent =
+              '\u{1F52C} Deep research \u2014 ' + doneCount + '/4 agents completed...';
+            continue;
+          }
+
+          if (poll.status === 'completed') {
+            // Render all results
+            for (const agent of AGENTS) {
+              showAgent(agent.id, 'done');
+              const r = poll.results[agent.id];
+              if (r && r.response) {
+                addResponseCard(agent, r.response, r.mode);
+              } else {
+                addResponseCard(agent, '\u274C Failed: ' + (r ? r.error : 'No response'));
+              }
+            }
+            if (poll.synthesis) addSynthesisCard(poll.synthesis);
+
+            // Save to history
+            const allResponses = {};
+            for (const agent of AGENTS) {
+              const r = poll.results[agent.id];
+              if (r && r.response) allResponses[agent.id] = r.response;
+            }
+            history.unshift({
+              query, responses: allResponses, synthesis: poll.synthesis,
+              timestamp: new Date().toLocaleTimeString()
+            });
+            updateHistoryUI();
+            break;
+          }
+
+          if (poll.status === 'failed') throw new Error('Deep research job failed');
+        }
+      } catch (err) {
+        document.getElementById('errorBox').textContent = 'Error: ' + err.message;
+        document.getElementById('errorBox').style.display = 'block';
+      }
+
+      clearInterval(timerInterval);
+      timerEl.style.display = 'none';
+      isRunning = false;
+      document.getElementById('runBtn').disabled = false;
+      document.getElementById('runBtn').textContent = 'CONSULT A-TEAM';
+      document.getElementById('statusHint').textContent = '4 real AI providers \u2014 each agent is a different brain';
       AGENTS.forEach(a => showAgent(a.id, 'idle'));
     }
 
@@ -654,7 +933,7 @@
         list.innerHTML = history.map((h, i) => `
           <div class="history-item" onclick="reloadHistory(${i})">
             <div class="history-query">"${escapeHtml(h.query)}"</div>
-            <div class="history-meta">${h.timestamp} · 4 responses + synthesis</div>
+            <div class="history-meta">${h.timestamp} \u00B7 4 responses + synthesis</div>
           </div>
         `).join('');
       }

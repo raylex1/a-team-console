@@ -450,10 +450,18 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', providers: keys });
 });
 
-// Consult a single agent
+// Consult a single agent (or start deep research job for all)
 app.post('/api/consult', async (req, res) => {
   try {
-    const { agentId, query, priorResponses } = req.body;
+    const { agentId, query, priorResponses, mode } = req.body;
+
+    // Deep mode: start background job for all agents
+    if (mode === 'deep') {
+      const jobId = startDeepJob('web_consult', query, ['claude', 'chatgpt', 'gemini', 'grok']);
+      return res.json({ jobId });
+    }
+
+    // Quick mode (default)
     const agent = AGENTS[agentId];
     if (!agent) return res.status(400).json({ error: 'Unknown agent' });
 
@@ -490,6 +498,43 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
     console.error('Synthesis error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Poll deep research job status (used by web UI)
+app.get('/api/results/:jobId', (req, res) => {
+  const job = deepJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const elapsed = +((Date.now() - job.createdAt) / 1000).toFixed(0);
+
+  if (job.status === 'researching') {
+    const progress = {};
+    for (const id of job.agentIds) {
+      if (job.results[id]) progress[id] = { status: 'done', mode: job.modes[id] };
+      else if (job.modes[id] === 'failed') progress[id] = { status: 'failed', error: job.errors[id] };
+      else progress[id] = { status: 'researching' };
+    }
+    return res.json({ status: 'researching', elapsed, progress });
+  }
+
+  if (job.status === 'completed') {
+    const results = {};
+    for (const id of job.agentIds) {
+      results[id] = {
+        response: job.results[id] || null,
+        mode: job.modes[id] || null,
+        error: job.errors[id] || null
+      };
+    }
+    return res.json({
+      status: 'completed',
+      elapsed: +((job.completedAt - job.createdAt) / 1000).toFixed(1),
+      results,
+      synthesis: job.synthesis
+    });
+  }
+
+  res.json({ status: job.status, elapsed });
 });
 
 // --- MCP Server (Streamable HTTP transport) ---
