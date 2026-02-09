@@ -650,7 +650,7 @@ function formatJobResults(job) {
 }
 
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.0.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.0.4' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
