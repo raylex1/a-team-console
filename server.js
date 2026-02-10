@@ -774,7 +774,11 @@ app.get('/auth/microsoft/callback',
 );
 
 app.get('/auth/logout', (req, res) => {
-  req.logout(() => res.redirect('/login'));
+  req.logout(function(err) {
+    req.session.destroy(function() {
+      res.redirect('/login');
+    });
+  });
 });
 
 // --- Unprotected: Login page ---
