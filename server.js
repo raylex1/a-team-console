@@ -8,6 +8,8 @@ const OIDCStrategy = require('passport-openid-connect').Strategy;
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
+const { execSync } = require('child_process');
+const fs = require('fs');
 
 const app = express();
 const BASE_URL = process.env.BASE_URL || 'https://polymetis.app';
@@ -732,6 +734,56 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
     return { content: [{ type: 'text', text: `Job ${job_id} status: ${job.status}` }] };
   });
 
+  // --- run_command ---
+  server.registerTool('run_command', {
+    title: 'Run Command',
+    description: 'Execute a bash command on the server and return stdout/stderr. 30 second timeout.',
+    inputSchema: z.object({
+      command: z.string().describe('The bash command to execute')
+    })
+  }, async ({ command }) => {
+    try {
+      const stdout = execSync(command, { timeout: 30000, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+      return { content: [{ type: 'text', text: stdout || '(no output)' }] };
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      return { content: [{ type: 'text', text: `Exit code: ${e.status}\n${output || e.message}` }], isError: true };
+    }
+  });
+
+  // --- read_file ---
+  server.registerTool('read_file', {
+    title: 'Read File',
+    description: 'Read the contents of a file and return it as text.',
+    inputSchema: z.object({
+      path: z.string().describe('The file path to read')
+    })
+  }, async ({ path: filePath }) => {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return { content: [{ type: 'text', text: content }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: `Error reading file: ${e.message}` }], isError: true };
+    }
+  });
+
+  // --- write_file ---
+  server.registerTool('write_file', {
+    title: 'Write File',
+    description: 'Write content to a file. Creates the file if it does not exist, overwrites if it does.',
+    inputSchema: z.object({
+      path: z.string().describe('The file path to write to'),
+      content: z.string().describe('The content to write')
+    })
+  }, async ({ path: filePath, content }) => {
+    try {
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return { content: [{ type: 'text', text: `File written: ${filePath}` }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: `Error writing file: ${e.message}` }], isError: true };
+    }
+  });
+
   return server;
 }
 
@@ -775,7 +827,9 @@ app.get('/auth/microsoft/callback',
 
 app.get('/auth/logout', (req, res) => {
   req.logout(function(err) {
-    req.session.destroy(function() {
+    if (err) return res.redirect('/');
+    req.session.destroy(function(err) {
+      res.clearCookie('ateam.sid');
       res.redirect('/login');
     });
   });
