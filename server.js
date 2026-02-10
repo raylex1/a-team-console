@@ -9,10 +9,18 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
 const { execSync } = require('child_process');
+const { Pool } = require('pg');
+const pgSession = require('connect-pg-simple')(session);
 const fs = require('fs');
 
 const app = express();
 const BASE_URL = process.env.BASE_URL || 'https://polymetis.app';
+
+// --- PostgreSQL ---
+const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: false }) : null;
+if (pool) {
+  pool.query('SELECT NOW()').then(() => console.log('PostgreSQL connected')).catch(e => console.log('PostgreSQL error:', e.message));
+}
 
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -20,6 +28,7 @@ app.use(express.json());
 // --- Session ---
 app.use(session({
   name: 'ateam.sid',
+  store: pool ? new pgSession({ pool, tableName: 'session', createTableIfMissing: true }) : undefined,
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
@@ -784,6 +793,52 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
     }
   });
 
+
+  // --- journal_read: Read persistent memory ---
+  server.registerTool('journal_read', {
+    title: 'Read Journal',
+    description: 'Read persistent memory entries from the database. Call this at the start of every new session to orient yourself. Returns all key-value pairs stored across sessions.',
+    inputSchema: z.object({
+      key: z.string().optional().describe('Optional specific key to read. Omit to read all entries.')
+    })
+  }, async ({ key }) => {
+    if (!pool) return { content: [{ type: 'text', text: 'No database configured' }], isError: true };
+    try {
+      let res;
+      if (key) {
+        res = await pool.query('SELECT key, value, updated_at FROM journal WHERE key = $1', [key]);
+      } else {
+        res = await pool.query('SELECT key, value, updated_at FROM journal ORDER BY id');
+      }
+      if (res.rows.length === 0) return { content: [{ type: 'text', text: key ? 'Key not found: ' + key : 'Journal is empty' }] };
+      const entries = res.rows.map(r => r.key + ': ' + r.value + ' (updated: ' + r.updated_at.toISOString().substring(0, 16) + ')').join('\n');
+      return { content: [{ type: 'text', text: entries }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: 'DB error: ' + e.message }], isError: true };
+    }
+  });
+
+  // --- journal_write: Write persistent memory ---
+  server.registerTool('journal_write', {
+    title: 'Write Journal',
+    description: 'Write or update a persistent memory entry in the database. Use this to save important context, decisions, session summaries, and anything the next session should know.',
+    inputSchema: z.object({
+      key: z.string().describe('The key name (e.g. last_session, architecture, next_priorities)'),
+      value: z.string().describe('The value to store')
+    })
+  }, async ({ key, value }) => {
+    if (!pool) return { content: [{ type: 'text', text: 'No database configured' }], isError: true };
+    try {
+      await pool.query(
+        'INSERT INTO journal (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
+        [key, value]
+      );
+      return { content: [{ type: 'text', text: 'Saved: ' + key }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: 'DB error: ' + e.message }], isError: true };
+    }
+  });
+
   return server;
 }
 
@@ -990,7 +1045,7 @@ app.get('*', (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v5.1.1 running on port ${PORT}`);
+  console.log(`A-Team Console v5.2.0 running on port ${PORT}`);
   console.log('OAuth:', oauthConfigured ? 'enabled' : 'disabled (open access)');
   console.log('Email whitelist:', process.env.ALLOWED_EMAILS ? 'enabled' : 'disabled (allow all)');
   console.log('Providers configured:', {
