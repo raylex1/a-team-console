@@ -81,6 +81,14 @@ if (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET) {
   }));
 }
 
+// --- Email whitelist ---
+function isEmailAllowed(email) {
+  const allowed = process.env.ALLOWED_EMAILS;
+  if (!allowed) return true; // no whitelist = allow all
+  const list = allowed.split(',').map(e => e.trim().toLowerCase());
+  return list.includes((email || '').toLowerCase());
+}
+
 // --- Agent configurations ---
 const AGENTS = {
   claude: {
@@ -588,7 +596,7 @@ function formatJobResults(job) {
 
 // --- MCP Server ---
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.1.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.1.1' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -742,7 +750,12 @@ app.get('/auth/google', (req, res, next) => {
 
 app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login' }),
-  (req, res) => res.redirect('/')
+  (req, res) => {
+    if (!isEmailAllowed(req.user?.email)) {
+      return req.logout(() => res.redirect('/denied'));
+    }
+    res.redirect('/');
+  }
 );
 
 app.get('/auth/microsoft', (req, res, next) => {
@@ -752,7 +765,12 @@ app.get('/auth/microsoft', (req, res, next) => {
 
 app.get('/auth/microsoft/callback',
   passport.authenticate('microsoft', { callback: true, failureRedirect: '/login' }),
-  (req, res) => res.redirect('/')
+  (req, res) => {
+    if (!isEmailAllowed(req.user?.email)) {
+      return req.logout(() => res.redirect('/denied'));
+    }
+    res.redirect('/');
+  }
 );
 
 app.get('/auth/logout', (req, res) => {
@@ -763,6 +781,11 @@ app.get('/auth/logout', (req, res) => {
 app.get('/login', (req, res) => {
   if (req.isAuthenticated()) return res.redirect('/');
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// --- Unprotected: Access denied page ---
+app.get('/denied', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'denied.html'));
 });
 
 // --- Unprotected: User info ---
@@ -909,8 +932,9 @@ app.get('*', (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v5.1 running on port ${PORT}`);
+  console.log(`A-Team Console v5.1.1 running on port ${PORT}`);
   console.log('OAuth:', oauthConfigured ? 'enabled' : 'disabled (open access)');
+  console.log('Email whitelist:', process.env.ALLOWED_EMAILS ? 'enabled' : 'disabled (allow all)');
   console.log('Providers configured:', {
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai: !!process.env.OPENAI_API_KEY,
