@@ -826,12 +826,12 @@ app.get('/auth/microsoft/callback',
 );
 
 app.get('/auth/logout', (req, res) => {
+  let done = false;
+  const finish = () => { if (!done) { done = true; res.clearCookie('ateam.sid'); res.redirect('/login'); } };
+  setTimeout(finish, 5000);
   req.logout(function(err) {
-    if (err) return res.redirect('/');
-    req.session.destroy(function(err) {
-      res.clearCookie('ateam.sid');
-      res.redirect('/login');
-    });
+    if (err) return finish();
+    req.session.destroy(function() { finish(); });
   });
 });
 
