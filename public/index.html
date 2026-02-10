@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A-Team Console v5.0</title>
+  <title>A-Team Console v5.1</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -270,50 +270,6 @@
     .history-query { font-size: 13px; color: #E2E8F0; margin-bottom: 4px; }
     .history-meta { font-size: 11px; color: #64748B; }
 
-    /* Password gate overlay */
-    .auth-overlay {
-      position: fixed; inset: 0; z-index: 9999;
-      background: linear-gradient(145deg, #0C0C1D 0%, #1A1A2E 40%, #16213E 100%);
-      display: flex; align-items: center; justify-content: center;
-    }
-    .auth-overlay.hidden { display: none; }
-    .auth-box {
-      text-align: center; padding: 40px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 16px; max-width: 360px; width: calc(100% - 32px);
-    }
-    .auth-box .logo { margin: 0 auto 16px; }
-    .auth-box h2 {
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 22px; font-weight: 700; margin-bottom: 6px;
-      background: linear-gradient(135deg, #F59E0B, #EF4444, #3B82F6, #10B981);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .auth-box p { font-size: 12px; color: #64748B; margin-bottom: 24px; }
-    .auth-input {
-      width: 100%; padding: 12px 16px; border-radius: 10px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12);
-      color: #E2E8F0; font-family: 'JetBrains Mono', monospace;
-      font-size: 14px; outline: none; margin-bottom: 12px;
-    }
-    .auth-input:focus {
-      border-color: rgba(245,158,11,0.5);
-      box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
-    }
-    .auth-submit {
-      width: 100%; padding: 12px;
-      background: linear-gradient(135deg, #F59E0B, #D97706);
-      color: #000; border: none; border-radius: 10px;
-      font-family: 'Space Grotesk', sans-serif;
-      font-weight: 600; font-size: 14px; cursor: pointer;
-      transition: all 0.2s;
-    }
-    .auth-submit:hover { box-shadow: 0 4px 20px rgba(245,158,11,0.3); }
-    .auth-error { color: #FCA5A5; font-size: 12px; margin-top: 12px; }
-
     /* Mode toggle */
     .mode-toggle {
       display: inline-flex; align-items: center; position: relative;
@@ -389,6 +345,34 @@
       color: #F59E0B; letter-spacing: 1px;
     }
 
+    /* User info in header */
+    .user-info {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .user-avatar-fallback {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #fff;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .user-name {
+      font-size: 12px; color: #94A3B8;
+      font-family: 'Space Grotesk', sans-serif; font-weight: 500;
+    }
+    .signout-btn {
+      font-size: 11px; color: #64748B; text-decoration: none;
+      padding: 4px 10px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.08);
+      transition: all 0.2s;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .signout-btn:hover { color: #E2E8F0; border-color: rgba(255,255,255,0.2); }
+
     /* Base styles for elements converted from inline styles */
     .header-right { display: flex; align-items: center; gap: 12px; }
     .query-hint-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -429,8 +413,10 @@
 
       /* Panels */
       .history-panel { padding: 16px; }
-      .auth-box { padding: 28px 20px; }
       .confirm-box { padding: 24px 20px; }
+
+      /* User info: hide name on small screens */
+      .user-name { display: none; }
     }
 
     /* ===== Small Phone: iPhone SE 375px, iPhone 14 390px, Pixel 412px ===== */
@@ -474,18 +460,6 @@
   </style>
 </head>
 <body>
-  <!-- Password Gate -->
-  <div id="authOverlay" class="auth-overlay">
-    <div class="auth-box">
-      <div class="logo">A</div>
-      <h2>A-TEAM CONSOLE</h2>
-      <p>Enter password to access</p>
-      <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="off">
-      <button id="authSubmit" class="auth-submit" onclick="submitAuth()">ENTER</button>
-      <div id="authError" class="auth-error"></div>
-    </div>
-  </div>
-
   <!-- Deep Research Confirmation Dialog -->
   <div id="deepConfirm" class="confirm-overlay" style="display:none;">
     <div class="confirm-box">
@@ -507,7 +481,7 @@
       <div class="logo">A</div>
       <div>
         <div class="header-title">A-TEAM CONSOLE</div>
-        <div class="header-sub">v5.0 &middot; 4 AI BRAINS &middot; 4 REAL APIs</div>
+        <div class="header-sub">v5.1 &middot; 4 AI BRAINS &middot; 4 REAL APIs</div>
       </div>
     </div>
     <div class="header-right">
@@ -518,6 +492,10 @@
       <button id="historyBtn" class="history-btn" style="display:none;" onclick="toggleHistory()">
         History (<span id="historyCount">0</span>)
       </button>
+      <div id="userInfo" class="user-info" style="display:none;">
+        <span id="userName" class="user-name"></span>
+        <a href="/auth/logout" class="signout-btn">Sign Out</a>
+      </div>
     </div>
   </div>
 
@@ -611,38 +589,6 @@
   </div>
 
   <script>
-    // --- Auth gate ---
-    async function submitAuth() {
-      const pw = document.getElementById('authPassword').value;
-      const errEl = document.getElementById('authError');
-      errEl.textContent = '';
-      try {
-        const res = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pw })
-        });
-        const data = await res.json();
-        if (data.ok) {
-          document.getElementById('authOverlay').classList.add('hidden');
-          checkHealth();
-        } else {
-          errEl.textContent = data.error || 'Wrong password';
-        }
-      } catch { errEl.textContent = 'Connection error'; }
-    }
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('authPassword').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') submitAuth();
-      });
-      // Check if already authenticated
-      fetch('/api/health').then(r => {
-        if (r.ok) document.getElementById('authOverlay').classList.add('hidden');
-      }).catch(() => {});
-      // Initialize mode toggle slider position
-      requestAnimationFrame(updateToggleUI);
-    });
-
     const AGENTS = [
       { id: 'claude', name: 'Claude', role: 'Principal Architect & Team Lead', color: '#D97706', provider: 'Anthropic' },
       { id: 'chatgpt', name: 'ChatGPT', role: 'Financial Research Analyst', color: '#059669', provider: 'OpenAI' },
@@ -654,6 +600,51 @@
     let history = [];
     let currentMode = 'quick';
     let pendingDeepQuery = null;
+
+    // --- Load user info ---
+    async function loadUser() {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return;
+        const user = await res.json();
+        const infoEl = document.getElementById('userInfo');
+        const nameEl = document.getElementById('userName');
+
+        // Insert avatar before the name
+        if (user.avatar) {
+          const img = document.createElement('img');
+          img.src = user.avatar;
+          img.className = 'user-avatar';
+          img.referrerPolicy = 'no-referrer';
+          infoEl.insertBefore(img, nameEl);
+        } else {
+          const fb = document.createElement('div');
+          fb.className = 'user-avatar-fallback';
+          fb.textContent = (user.name || 'U')[0].toUpperCase();
+          infoEl.insertBefore(fb, nameEl);
+        }
+
+        nameEl.textContent = user.name || user.email || '';
+        infoEl.style.display = 'flex';
+      } catch {}
+    }
+
+    // --- Auth-aware fetch wrapper ---
+    async function authFetch(url, opts) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) {
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
+      return res;
+    }
+
+    // --- Init ---
+    document.addEventListener('DOMContentLoaded', () => {
+      loadUser();
+      checkHealth();
+      requestAnimationFrame(updateToggleUI);
+    });
 
     // --- Mode Toggle ---
     function toggleMode() {
@@ -699,7 +690,7 @@
     // Check API health on load
     async function checkHealth() {
       try {
-        const res = await fetch('/api/health');
+        const res = await authFetch('/api/health');
         const data = await res.json();
         const count = Object.values(data.providers).filter(Boolean).length;
         const badge = document.getElementById('statusText');
@@ -719,7 +710,6 @@
         document.querySelector('.status-dot').style.background = '#EF4444';
       }
     }
-    checkHealth();
 
     // Input handling
     const input = document.getElementById('queryInput');
@@ -843,7 +833,7 @@
           showAgent(agent.id, 'thinking');
           document.getElementById('statusHint').textContent = `Consulting ${agent.name}...`;
 
-          const res = await fetch('/api/consult', {
+          const res = await authFetch('/api/consult', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -865,7 +855,7 @@
 
         // Synthesis
         document.getElementById('statusHint').textContent = 'Synthesizing team perspectives...';
-        const synthRes = await fetch('/api/synthesize', {
+        const synthRes = await authFetch('/api/synthesize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query, allResponses: priorText })
@@ -882,6 +872,7 @@
         updateHistoryUI();
 
       } catch (err) {
+        if (err.message === 'Session expired') return;
         document.getElementById('errorBox').textContent = 'Error: ' + err.message;
         document.getElementById('errorBox').style.display = 'block';
       }
@@ -921,7 +912,7 @@
 
       try {
         // Start deep job
-        const res = await fetch('/api/consult', {
+        const res = await authFetch('/api/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query, mode: 'deep' })
@@ -933,7 +924,7 @@
         // Poll for results every 5 seconds
         while (true) {
           await new Promise(r => setTimeout(r, 5000));
-          const pollRes = await fetch('/api/results/' + jobId);
+          const pollRes = await authFetch('/api/results/' + jobId);
           const poll = await pollRes.json();
 
           if (poll.error) throw new Error(poll.error);
@@ -986,6 +977,7 @@
           if (poll.status === 'failed') throw new Error('Deep research job failed');
         }
       } catch (err) {
+        if (err.message === 'Session expired') return;
         document.getElementById('errorBox').textContent = 'Error: ' + err.message;
         document.getElementById('errorBox').style.display = 'block';
       }

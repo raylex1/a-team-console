@@ -1,50 +1,87 @@
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const session = require('express-session');
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const OIDCStrategy = require('passport-openid-connect').Strategy;
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
-const app = express();
 
+const app = express();
+const BASE_URL = process.env.BASE_URL || 'https://polymetis.app';
+
+app.set('trust proxy', 1);
 app.use(express.json());
 
-// --- Password gate ---
-const AUTH_SECRET = crypto.randomBytes(32).toString('hex');
+// --- Session ---
+app.use(session({
+  name: 'ateam.sid',
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: BASE_URL.startsWith('https'),
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: 'lax'
+  }
+}));
 
-function makeToken() {
-  return crypto.createHmac('sha256', AUTH_SECRET).update(process.env.APP_PASSWORD || '').digest('hex');
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Normalize all users to { id, name, email, avatar, provider }
+passport.serializeUser((user, done) => {
+  if (user && user.data && typeof user.serialize === 'function') {
+    const info = user.data;
+    return done(null, {
+      id: info.sub || info.id,
+      name: info.name || info.preferred_username || 'User',
+      email: info.email || null,
+      avatar: info.picture || null,
+      provider: 'microsoft'
+    });
+  }
+  done(null, user);
+});
+passport.deserializeUser((obj, done) => done(null, obj));
+
+// --- OAuth strategies ---
+const oauthConfigured = !!(
+  (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ||
+  (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET)
+);
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: BASE_URL + '/auth/google/callback'
+  }, (accessToken, refreshToken, profile, done) => {
+    done(null, {
+      id: profile.id,
+      name: profile.displayName,
+      email: profile.emails?.[0]?.value,
+      avatar: profile.photos?.[0]?.value,
+      provider: 'google'
+    });
+  }));
 }
 
-// Auth endpoint
-app.post('/api/auth', (req, res) => {
-  const { password } = req.body;
-  if (!process.env.APP_PASSWORD) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
-  if (password === process.env.APP_PASSWORD) {
-    res.cookie('auth_token', makeToken(), { httpOnly: true, sameSite: 'strict', maxAge: 24 * 60 * 60 * 1000 });
-    return res.json({ ok: true });
-  }
-  res.status(401).json({ error: 'Wrong password' });
-});
+if (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET) {
+  passport.use('microsoft', new OIDCStrategy({
+    issuerHost: 'https://login.microsoftonline.com/common/v2.0',
+    client_id: process.env.MICROSOFT_CLIENT_ID,
+    client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+    redirect_uri: BASE_URL + '/auth/microsoft/callback',
+    scope: 'openid profile email',
+    response_type: 'code'
+  }));
+}
 
-// Middleware: protect everything except /api/auth
-app.use((req, res, next) => {
-  if (req.path === '/api/auth' || req.path === '/mcp') return next();
-  if (!process.env.APP_PASSWORD) return next(); // no password set = open access
-  const cookies = {};
-  (req.headers.cookie || '').split(';').forEach(c => {
-    const [k, v] = c.trim().split('=');
-    if (k) cookies[k] = v;
-  });
-  if (cookies.auth_token === makeToken()) return next();
-  // For API calls, return 401
-  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
-  // For page loads, serve the login page
-  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Agent configurations with their real API endpoints
+// --- Agent configurations ---
 const AGENTS = {
   claude: {
     name: 'Claude',
@@ -439,107 +476,7 @@ const QUICK_MODEL_NAMES = {
   xai: 'Grok 4.1 Fast Non-Reasoning'
 };
 
-// Health check
-app.get('/api/health', (req, res) => {
-  const keys = {
-    anthropic: !!process.env.ANTHROPIC_API_KEY,
-    openai: !!process.env.OPENAI_API_KEY,
-    google: !!process.env.GOOGLE_AI_API_KEY,
-    xai: !!process.env.XAI_API_KEY
-  };
-  res.json({ status: 'ok', providers: keys });
-});
-
-// Consult a single agent (or start deep research job for all)
-app.post('/api/consult', async (req, res) => {
-  try {
-    const { agentId, query, priorResponses, mode } = req.body;
-
-    // Deep mode: start background job for all agents
-    if (mode === 'deep') {
-      const jobId = startDeepJob('web_consult', query, ['claude', 'chatgpt', 'gemini', 'grok']);
-      return res.json({ jobId });
-    }
-
-    // Quick mode (default)
-    const agent = AGENTS[agentId];
-    if (!agent) return res.status(400).json({ error: 'Unknown agent' });
-
-    const contextMsg = priorResponses
-      ? `\n\nHere is what the other consultants have said so far:\n${priorResponses}\n\nNow give YOUR perspective on the user's question. Agree or disagree with the others as you see fit.`
-      : '';
-
-    const callFn = PROVIDERS[agent.provider];
-    const response = await callFn(agent.systemPrompt, query + contextMsg);
-
-    res.json({ agentId, response });
-  } catch (err) {
-    console.error(`Agent error:`, err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Synthesis endpoint (always uses Claude)
-app.post('/api/synthesize', async (req, res) => {
-  try {
-    const { query, allResponses } = req.body;
-
-    const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
-- Identifies where the team agrees
-- Highlights the most important disagreements
-- Gives your architectural recommendation as team lead
-- Is honest about remaining uncertainties
-
-Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
-
-    const response = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
-    res.json({ response });
-  } catch (err) {
-    console.error('Synthesis error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Poll deep research job status (used by web UI)
-app.get('/api/results/:jobId', (req, res) => {
-  const job = deepJobs.get(req.params.jobId);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-
-  const elapsed = +((Date.now() - job.createdAt) / 1000).toFixed(0);
-
-  if (job.status === 'researching') {
-    const progress = {};
-    for (const id of job.agentIds) {
-      if (job.results[id]) progress[id] = { status: 'done', mode: job.modes[id] };
-      else if (job.modes[id] === 'failed') progress[id] = { status: 'failed', error: job.errors[id] };
-      else progress[id] = { status: 'researching' };
-    }
-    return res.json({ status: 'researching', elapsed, progress });
-  }
-
-  if (job.status === 'completed') {
-    const results = {};
-    for (const id of job.agentIds) {
-      results[id] = {
-        response: job.results[id] || null,
-        mode: job.modes[id] || null,
-        error: job.errors[id] || null
-      };
-    }
-    return res.json({
-      status: 'completed',
-      elapsed: +((job.completedAt - job.createdAt) / 1000).toFixed(1),
-      results,
-      synthesis: job.synthesis
-    });
-  }
-
-  res.json({ status: job.status, elapsed });
-});
-
-// --- MCP Server (Streamable HTTP transport) ---
-
-// In-memory job store for async deep research
+// --- In-memory job store for async deep research ---
 const deepJobs = new Map();
 
 // Clean up jobs older than 1 hour
@@ -649,8 +586,9 @@ function formatJobResults(job) {
   return parts.join('\n\n');
 }
 
+// --- MCP Server ---
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.0.4' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.1.0' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -789,6 +727,51 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
   return server;
 }
 
+// =====================================================
+// ROUTES
+// =====================================================
+
+// --- Unprotected: Health check ---
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// --- Unprotected: Auth routes ---
+app.get('/auth/google', (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID) return res.redirect('/login');
+  passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+});
+
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  (req, res) => res.redirect('/')
+);
+
+app.get('/auth/microsoft', (req, res, next) => {
+  if (!process.env.MICROSOFT_CLIENT_ID) return res.redirect('/login');
+  passport.authenticate('microsoft')(req, res, next);
+});
+
+app.get('/auth/microsoft/callback',
+  passport.authenticate('microsoft', { callback: true, failureRedirect: '/login' }),
+  (req, res) => res.redirect('/')
+);
+
+app.get('/auth/logout', (req, res) => {
+  req.logout(() => res.redirect('/login'));
+});
+
+// --- Unprotected: Login page ---
+app.get('/login', (req, res) => {
+  if (req.isAuthenticated()) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// --- Unprotected: User info ---
+app.get('/api/me', (req, res) => {
+  if (req.isAuthenticated()) return res.json(req.user);
+  res.status(401).json({ error: 'Not authenticated' });
+});
+
+// --- Unprotected: MCP endpoints ---
 app.post('/mcp', async (req, res) => {
   const server = createMcpServer();
   try {
@@ -812,14 +795,122 @@ app.delete('/mcp', (req, res) => {
   res.writeHead(405).end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
 });
 
-// Serve frontend
+// --- Auth middleware: protect everything below ---
+app.use((req, res, next) => {
+  if (!oauthConfigured) return next();
+  if (req.isAuthenticated()) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+  res.redirect('/login');
+});
+
+// --- Protected: Static files ---
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Protected: API routes ---
+app.get('/api/health', (req, res) => {
+  const keys = {
+    anthropic: !!process.env.ANTHROPIC_API_KEY,
+    openai: !!process.env.OPENAI_API_KEY,
+    google: !!process.env.GOOGLE_AI_API_KEY,
+    xai: !!process.env.XAI_API_KEY
+  };
+  res.json({ status: 'ok', providers: keys });
+});
+
+app.post('/api/consult', async (req, res) => {
+  try {
+    const { agentId, query, priorResponses, mode } = req.body;
+
+    // Deep mode: start background job for all agents
+    if (mode === 'deep') {
+      const jobId = startDeepJob('web_consult', query, ['claude', 'chatgpt', 'gemini', 'grok']);
+      return res.json({ jobId });
+    }
+
+    // Quick mode (default)
+    const agent = AGENTS[agentId];
+    if (!agent) return res.status(400).json({ error: 'Unknown agent' });
+
+    const contextMsg = priorResponses
+      ? `\n\nHere is what the other consultants have said so far:\n${priorResponses}\n\nNow give YOUR perspective on the user's question. Agree or disagree with the others as you see fit.`
+      : '';
+
+    const callFn = PROVIDERS[agent.provider];
+    const response = await callFn(agent.systemPrompt, query + contextMsg);
+
+    res.json({ agentId, response });
+  } catch (err) {
+    console.error(`Agent error:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/synthesize', async (req, res) => {
+  try {
+    const { query, allResponses } = req.body;
+
+    const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
+- Identifies where the team agrees
+- Highlights the most important disagreements
+- Gives your architectural recommendation as team lead
+- Is honest about remaining uncertainties
+
+Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
+
+    const response = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
+    res.json({ response });
+  } catch (err) {
+    console.error('Synthesis error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/results/:jobId', (req, res) => {
+  const job = deepJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const elapsed = +((Date.now() - job.createdAt) / 1000).toFixed(0);
+
+  if (job.status === 'researching') {
+    const progress = {};
+    for (const id of job.agentIds) {
+      if (job.results[id]) progress[id] = { status: 'done', mode: job.modes[id] };
+      else if (job.modes[id] === 'failed') progress[id] = { status: 'failed', error: job.errors[id] };
+      else progress[id] = { status: 'researching' };
+    }
+    return res.json({ status: 'researching', elapsed, progress });
+  }
+
+  if (job.status === 'completed') {
+    const results = {};
+    for (const id of job.agentIds) {
+      results[id] = {
+        response: job.results[id] || null,
+        mode: job.modes[id] || null,
+        error: job.errors[id] || null
+      };
+    }
+    return res.json({
+      status: 'completed',
+      elapsed: +((job.completedAt - job.createdAt) / 1000).toFixed(1),
+      results,
+      synthesis: job.synthesis
+    });
+  }
+
+  res.json({ status: job.status, elapsed });
+});
+
+// --- Protected: Catch-all SPA ---
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// --- Start server ---
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v5.0 running on port ${PORT}`);
+  console.log(`A-Team Console v5.1 running on port ${PORT}`);
+  console.log('OAuth:', oauthConfigured ? 'enabled' : 'disabled (open access)');
   console.log('Providers configured:', {
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai: !!process.env.OPENAI_API_KEY,
