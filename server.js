@@ -9,8 +9,6 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
 
-console.log('ENV CHECK:', 'GOOGLE_CLIENT_ID' in process.env, 'GOOGLE_CLIENT_SECRET' in process.env, 'SESSION_SECRET' in process.env);
-
 const app = express();
 const BASE_URL = process.env.BASE_URL || 'https://polymetis.app';
 
