@@ -59,7 +59,9 @@
       "Bash(railway logs:*)",
       "Bash(railway up:*)",
       "Bash(del nul)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(node -c:*)",
+      "Bash(railway --version:*)"
     ]
   }
 }
