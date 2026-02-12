@@ -529,19 +529,12 @@ function startDeepJob(toolName, query, agentIds) {
   // Fire and forget — runs in background
   (async () => {
     try {
-      // Per-agent timeout: 3 minutes max for deep mode before falling back to quick
-      const AGENT_DEEP_TIMEOUT = 3 * 60 * 1000;
-
-      // Call all requested agents in parallel (deep → timeout → quick fallback)
+      // Call all requested agents in parallel (deep → quick fallback)
       await Promise.all(agentIds.map(async (id) => {
         const agent = AGENTS[id];
         try {
           const callFn = DEEP_PROVIDERS[agent.provider];
-          const deepPromise = callFn(agent.systemPrompt, query);
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Deep research timed out after ${AGENT_DEEP_TIMEOUT / 1000}s`)), AGENT_DEEP_TIMEOUT)
-          );
-          job.results[id] = await Promise.race([deepPromise, timeoutPromise]);
+          job.results[id] = await callFn(agent.systemPrompt, query);
           job.modes[id] = 'deep';
           console.log(`Job ${jobId}: ${id} completed (deep)`);
         } catch (deepErr) {
