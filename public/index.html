@@ -793,7 +793,11 @@
       requestAnimationFrame(updateToggleUI);
       updateEstimate();
       loadUsageStats();
-      document.getElementById('queryInput').addEventListener('input', debounce(updateEstimate, 500));
+      const qInput = document.getElementById('queryInput');
+      const debouncedEstimate = debounce(updateEstimate, 300);
+      qInput.addEventListener('input', debouncedEstimate);
+      qInput.addEventListener('paste', () => setTimeout(updateEstimate, 100));
+      qInput.addEventListener('keyup', debouncedEstimate);
     });
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     // --- Mode Toggle ---
