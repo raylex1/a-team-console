@@ -707,7 +707,7 @@
           const el = document.getElementById('est-' + id);
           if (el) {
             if (est.mode === 'off') { el.textContent = ''; el.classList.remove('has-cost'); }
-            else { el.textContent = '~$' + est.cost.toFixed(est.cost < 0.01 ? 4 : 2); el.classList.add('has-cost'); }
+            else { el.textContent = '~$' + est.cost.toFixed(4); el.classList.add('has-cost'); }
           }
         }
         const breakdown = document.getElementById('costBreakdown');
@@ -716,13 +716,13 @@
           const est = data.estimates[agent.id];
           if (est) {
             const cls = est.mode === 'off' ? 'cost-item off' : 'cost-item';
-            const val = est.mode === 'off' ? 'OFF' : '$' + est.cost.toFixed(est.cost < 0.01 ? 4 : 2);
+            const val = est.mode === 'off' ? 'OFF' : '$' + est.cost.toFixed(4);
             items += '<span class="' + cls + '"><span class="name">' + agent.name + ':</span> <span class="val">' + val + '</span></span> ';
           }
         }
-        if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(2) + '</span></span>';
+        if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(4) + '</span></span>';
         breakdown.innerHTML = items;
-        document.getElementById('costTotal').textContent = '$' + data.total.toFixed(2);
+        document.getElementById('costTotal').textContent = '$' + data.total.toFixed(4);
       } catch (e) {}
     }
 
