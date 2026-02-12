@@ -355,7 +355,7 @@ async function callAnthropicDeep(systemPrompt, userMessage) {
       signal: AbortSignal.timeout(300000),
       body: JSON.stringify({
         model,
-        max_tokens: 16000,
+        max_tokens: 46000,  // must exceed budget_tokens (30K thinking + 16K output)
         thinking: { type: 'enabled', budget_tokens: 30000 },
         system: systemPrompt + researchEnhancement,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
@@ -1211,7 +1211,7 @@ app.post('/api/estimate', (req, res) => {
   
   const SYNTH_ESTIMATES = {
     quick: { input: 12000, output: 4000, model: 'claude-opus-4-6' },  // ingests all quick responses
-    deep:  { input: 80000, output: 8000, model: 'o3-deep-research-2025-06-26' }  // ingests all deep responses
+    deep:  { input: 150000, output: 8000, model: 'o3-deep-research-2025-06-26' }  // ingests all deep responses
   };
   
   const modes = agentModes || {};
@@ -1302,7 +1302,7 @@ app.get('*', (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v5.3.0 running on port ${PORT}`);
+  console.log(`A-Team Console v5.7.1 running on port ${PORT}`);
   console.log('OAuth:', oauthConfigured ? 'enabled' : 'disabled (open access)');
   console.log('Email whitelist:', process.env.ALLOWED_EMAILS ? 'enabled' : 'disabled (allow all)');
   console.log('Providers configured:', {
