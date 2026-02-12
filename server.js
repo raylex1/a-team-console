@@ -47,8 +47,8 @@ const PRICING = {
   'gpt-4o-mini':                 { input: 0.15,  output: 0.60  },
   'gemini-2.5-flash-preview-04-17': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash-lite':       { input: 0.10,  output: 0.40  },
-  'deep-research-pro-preview-12-2025': { input: 0.10, output: 0.40 },
-  'grok-4-1-fast':               { input: 3.00,  output: 15.00 },
+  'deep-research-pro-preview-12-2025': { input: 1.25, output: 10.00 },  // Gemini Pro-class deep research
+  'grok-4-1-fast':               { input: 0.20,  output: 0.50  },  // same as 4.1 Fast variants
   'grok-4-1-fast-non-reasoning': { input: 0.20,  output: 0.50  },
   'grok-4-1-fast-reasoning':     { input: 0.20,  output: 0.50  },
 };
@@ -1200,7 +1200,7 @@ app.post('/api/estimate', (req, res) => {
   
   const ESTIMATES = {
     claude:  { quick: { input: 2200 + queryTokens, output: 500,  model: 'claude-sonnet-4-20250514' },
-               deep:  { input: 5000 + queryTokens, output: 16000, model: 'claude-opus-4-6' } },
+               deep:  { input: 5000 + queryTokens, output: 46000, model: 'claude-opus-4-6' } }  // 16K response + 30K thinking,
     chatgpt: { quick: { input: 500 + queryTokens,  output: 500,  model: 'gpt-4o-mini' },
                deep:  { input: 2000 + queryTokens,  output: 5000, model: 'o3-deep-research-2025-06-26' } },
     gemini:  { quick: { input: 200 + queryTokens,   output: 500,  model: 'gemini-2.5-flash-lite' },
@@ -1210,8 +1210,8 @@ app.post('/api/estimate', (req, res) => {
   };
   
   const SYNTH_ESTIMATES = {
-    quick: { input: 8000, output: 4000, model: 'claude-opus-4-6' },
-    deep:  { input: 25000, output: 5000, model: 'o3-deep-research-2025-06-26' }
+    quick: { input: 12000, output: 4000, model: 'claude-opus-4-6' },  // ingests all quick responses
+    deep:  { input: 80000, output: 8000, model: 'o3-deep-research-2025-06-26' }  // ingests all deep responses
   };
   
   const modes = agentModes || {};
