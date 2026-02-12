@@ -1223,7 +1223,7 @@ app.post('/api/estimate', (req, res) => {
     const est = ESTIMATES[agent]?.[mode] || ESTIMATES[agent]?.quick;
     if (est) {
       const cost = calcCost(est.model, est.input, est.output);
-      estimates[agent] = { cost: +cost.toFixed(4), mode, model: est.model, input: est.input, output: est.output };
+      estimates[agent] = { cost: +cost.toFixed(6), mode, model: est.model, input: est.input, output: est.output };
       total += cost;
     }
   }
@@ -1235,11 +1235,11 @@ app.post('/api/estimate', (req, res) => {
   if (activeCount > 1) {
     const se = SYNTH_ESTIMATES[consMode];
     const synthCost = calcCost(se.model, se.input * (activeCount / 4), se.output);
-    synthEstimate = { cost: +synthCost.toFixed(4), mode: consMode, model: se.model };
+    synthEstimate = { cost: +synthCost.toFixed(6), mode: consMode, model: se.model };
     total += synthCost;
   }
   
-  res.json({ estimates, consolidator: synthEstimate, total: +total.toFixed(4) });
+  res.json({ estimates, consolidator: synthEstimate, total: +total.toFixed(6) });
 });
 
 // --- API Usage & Cost Tracking ---
