@@ -330,13 +330,14 @@ async function callOpenAIDeep(systemPrompt, userMessage) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'o3-deep-research',
+        model: 'o3-deep-research-2025-06-26',
         input: [
           { role: 'developer', content: systemPrompt },
           { role: 'user', content: userMessage }
         ],
         background: true,
-        tools: [{ type: 'web_search_preview' }]
+        reasoning: { summary: 'auto' },
+        tools: [{ type: 'web_search_preview' }, { type: 'code_interpreter' }]
       })
     });
 
@@ -491,7 +492,7 @@ const DEEP_PROVIDERS = {
 // Model name maps for fallback notifications
 const DEEP_MODEL_NAMES = {
   anthropic: 'Claude Opus 4.6 (Deep Think + Multi-Search)',
-  openai: 'o3-deep-research',
+  openai: 'o3-deep-research-2025-06-26',
   google: 'Gemini Deep Research',
   xai: 'Grok 4.1 Reasoning + DeepSearch'
 };
@@ -676,7 +677,7 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
   // --- Individual agent tools ---
   const agentTools = [
     { id: 'claude', tool: 'consult_claude', title: 'Consult Claude', desc: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with 30K-token extended thinking and unlimited multi-step web search.' },
-    { id: 'chatgpt', tool: 'consult_chatgpt', title: 'Consult ChatGPT', desc: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research with background web research.' },
+    { id: 'chatgpt', tool: 'consult_chatgpt', title: 'Consult ChatGPT', desc: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research-2025-06-26 with background web research, reasoning summaries, and code interpreter.' },
     { id: 'gemini', tool: 'consult_gemini', title: 'Consult Gemini', desc: 'Consult Gemini (Google) — Data Analyst & Ranker. Deep mode uses Gemini Deep Research agent.' },
     { id: 'grok', tool: 'consult_grok', title: 'Consult Grok', desc: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast Reasoning with web search, X search, and code execution (full DeepSearch)." }
   ];
