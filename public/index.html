@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>A-Team Console v5.6</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -590,7 +591,7 @@
     <div class="cost-meter" id="costMeter">
       <div class="cost-header">
         <span class="cost-icon">&#x1F4B0;</span>
-        <span class="cost-label">ESTIMATED COST</span>
+        <span class="cost-label">ESTIMATED COST</span><span id="tokenDebug" style="font-size:10px;color:#F59E0B;margin-left:12px;font-family:'JetBrains Mono',monospace;"></span>
         <span class="cost-total" id="costTotal">$0.00</span>
       </div>
       <div class="cost-breakdown" id="costBreakdown"></div>
@@ -696,6 +697,10 @@
     }
 
     async function updateEstimate() {
+      const qLen = document.getElementById('queryInput').value.length;
+      const tokEst = Math.ceil(qLen / 4);
+      document.getElementById('tokenDebug').textContent = qLen + ' chars / ~' + tokEst + ' tokens';
+      console.log('updateEstimate called:', qLen, 'chars,', tokEst, 'tokens');
       const query = document.getElementById('queryInput').value || 'sample query';
       try {
         const res = await fetch('/api/estimate', {
@@ -703,6 +708,7 @@
           body: JSON.stringify({ query, agentModes: getAgentModes(), consolidatorMode: currentMode })
         });
         const data = await res.json();
+        console.log('Estimate response:', JSON.stringify(data).substring(0, 200));
         for (const [id, est] of Object.entries(data.estimates)) {
           const el = document.getElementById('est-' + id);
           if (el) {
@@ -723,7 +729,7 @@
         if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(5) + '</span></span>';
         breakdown.innerHTML = items;
         document.getElementById('costTotal').textContent = '$' + data.total.toFixed(5);
-      } catch (e) {}
+      } catch (e) { console.error('Estimate error:', e); }
     }
 
     async function loadUsageStats() {
@@ -732,7 +738,7 @@
         const data = await res.json();
         if (data.today) document.getElementById('costToday').textContent = '$' + (data.today.today_cost || '0.00');
         if (data.total) document.getElementById('costAllTime').textContent = '$' + (data.total.total_cost || '0.00');
-      } catch (e) {}
+      } catch (e) { console.error('Estimate error:', e); }
     }
 
     function showRegister(costs, synthesisCost) {
