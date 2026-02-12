@@ -256,7 +256,11 @@ async function callXAI(systemPrompt, userMessage) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      tools: [{ type: 'web_search' }]
+      tools: [
+        { type: 'web_search' },
+        { type: 'x_search' },
+        { type: 'code_execution' }
+      ]
     })
   });
 
@@ -281,6 +285,8 @@ async function callAnthropicDeep(systemPrompt, userMessage) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
 
+  const researchEnhancement = '\nIMPORTANT: This is a DEEP RESEARCH query. Use web search extensively — search multiple times to gather comprehensive information. Refine your queries based on initial results. Cross-reference multiple sources. Provide citations. Be thorough — this is a research report, not a quick answer.';
+
   async function tryModel(model) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -289,13 +295,13 @@ async function callAnthropicDeep(systemPrompt, userMessage) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(300000),
       body: JSON.stringify({
         model,
         max_tokens: 16000,
-        thinking: { type: 'enabled', budget_tokens: 10000 },
-        system: systemPrompt,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+        thinking: { type: 'enabled', budget_tokens: 30000 },
+        system: systemPrompt + researchEnhancement,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: userMessage }]
       })
     });
@@ -448,17 +454,19 @@ async function callXAIDeep(systemPrompt, userMessage) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error('XAI_API_KEY not configured');
 
+  const researchEnhancement = '\nIMPORTANT: This is a DEEP RESEARCH query. Use ALL available tools: web_search for comprehensive web research, x_search for real-time discussions and expert opinions, code_execution for calculations or data analysis. Search multiple times, refine, dig deeper. Cite sources. Be thorough.';
+
   const res = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(300000),
     body: JSON.stringify({
-      model: 'grok-4-1-fast',
+      model: 'grok-4-1-fast-reasoning',
       input: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: systemPrompt + researchEnhancement },
         { role: 'user', content: userMessage }
       ],
       tools: [{ type: 'web_search' }]
@@ -482,10 +490,10 @@ const DEEP_PROVIDERS = {
 
 // Model name maps for fallback notifications
 const DEEP_MODEL_NAMES = {
-  anthropic: 'Claude Opus 4.6',
+  anthropic: 'Claude Opus 4.6 (Deep Think + Multi-Search)',
   openai: 'o3-deep-research',
   google: 'Gemini Deep Research',
-  xai: 'Grok 4.1 Fast'
+  xai: 'Grok 4.1 Reasoning + DeepSearch'
 };
 
 const QUICK_MODEL_NAMES = {
@@ -667,10 +675,10 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
 
   // --- Individual agent tools ---
   const agentTools = [
-    { id: 'claude', tool: 'consult_claude', title: 'Consult Claude', desc: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with extended thinking and web search.' },
+    { id: 'claude', tool: 'consult_claude', title: 'Consult Claude', desc: 'Consult Claude (Anthropic) — Principal Architect & Team Lead. Deep mode uses Claude Opus with 30K-token extended thinking and unlimited multi-step web search.' },
     { id: 'chatgpt', tool: 'consult_chatgpt', title: 'Consult ChatGPT', desc: 'Consult ChatGPT (OpenAI) — Financial Research Analyst. Deep mode uses o3-deep-research with background web research.' },
     { id: 'gemini', tool: 'consult_gemini', title: 'Consult Gemini', desc: 'Consult Gemini (Google) — Data Analyst & Ranker. Deep mode uses Gemini Deep Research agent.' },
-    { id: 'grok', tool: 'consult_grok', title: 'Consult Grok', desc: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast with agentic web search." }
+    { id: 'grok', tool: 'consult_grok', title: 'Consult Grok', desc: "Consult Grok (xAI) — Devil's Advocate & Risk Analyst. Deep mode uses Grok 4.1 Fast Reasoning with web search, X search, and code execution (full DeepSearch)." }
   ];
 
   for (const at of agentTools) {
@@ -1045,7 +1053,7 @@ app.get('*', (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 const httpServer = app.listen(PORT, () => {
-  console.log(`A-Team Console v5.2.0 running on port ${PORT}`);
+  console.log(`A-Team Console v5.3.0 running on port ${PORT}`);
   console.log('OAuth:', oauthConfigured ? 'enabled' : 'disabled (open access)');
   console.log('Email whitelist:', process.env.ALLOWED_EMAILS ? 'enabled' : 'disabled (allow all)');
   console.log('Providers configured:', {
