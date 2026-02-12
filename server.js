@@ -580,7 +580,11 @@ setInterval(() => {
 const modeSchema = z.enum(['quick', 'deep']).default('deep').describe('quick = fast models (immediate response), deep = deep research with extended thinking and web search (returns job ID, poll with get_research_results)');
 
 // Run a deep research job in the background (fire-and-forget)
-function startDeepJob(toolName, query, agentIds) {
+function startDeepJob(toolName, query, agentIds, agentModes, consolidatorMode) {
+  // agentModes: { claude: 'deep', chatgpt: 'quick', ... } — if not provided, all deep
+  // consolidatorMode: 'quick' | 'deep' — if not provided, defaults to 'deep'
+  const modeMap = agentModes || {};
+  const synthMode = consolidatorMode || 'deep';
   const jobId = crypto.randomUUID();
   const job = {
     id: jobId,
@@ -588,10 +592,14 @@ function startDeepJob(toolName, query, agentIds) {
     query,
     status: 'researching',
     agentIds,
+    agentModes: modeMap,
+    consolidatorMode: synthMode,
     results: {},
     errors: {},
     modes: {},
+    costs: {},
     synthesis: null,
+    synthesisCost: null,
     createdAt: Date.now(),
     completedAt: null
   };
@@ -600,34 +608,60 @@ function startDeepJob(toolName, query, agentIds) {
   // Fire and forget — runs in background
   (async () => {
     try {
-      // Call all requested agents in parallel (deep → quick fallback)
+      // Call all requested agents in parallel, respecting per-agent mode
       await Promise.all(agentIds.map(async (id) => {
         const agent = AGENTS[id];
-        try {
-          const callFn = DEEP_PROVIDERS[agent.provider];
-          job.results[id] = await callFn(agent.systemPrompt, query);
-          job.modes[id] = 'deep';
-          console.log(`Job ${jobId}: ${id} completed (deep)`);
-        } catch (deepErr) {
-          console.log(`Job ${jobId}: ${id} deep failed: ${deepErr.message}, falling back to quick`);
+        const requestedMode = modeMap[id] || 'deep';
+        const agentStart = Date.now();
+        
+        if (requestedMode === 'quick') {
+          // Quick mode — use fast provider directly
           try {
-            const quickFn = PROVIDERS[agent.provider];
-            job.results[id] = await quickFn(agent.systemPrompt, query);
-            job.modes[id] = 'fallback';
-            job.errors[id] = deepErr.message;
-            console.log(`Job ${jobId}: ${id} completed (fallback to quick)`);
-          } catch (quickErr) {
+            const callFn = PROVIDERS[agent.provider];
+            job.results[id] = await callFn(agent.systemPrompt, query);
+            job.modes[id] = 'quick';
+            console.log(`Job ${jobId}: ${id} completed (quick)`);
+          } catch (err) {
             job.modes[id] = 'failed';
-            job.errors[id] = `Deep: ${deepErr.message} | Quick: ${quickErr.message}`;
-            console.log(`Job ${jobId}: ${id} both failed: ${quickErr.message}`);
+            job.errors[id] = err.message;
+            console.log(`Job ${jobId}: ${id} quick failed: ${err.message}`);
           }
+        } else {
+          // Deep mode — try deep, fall back to quick
+          try {
+            const callFn = DEEP_PROVIDERS[agent.provider];
+            job.results[id] = await callFn(agent.systemPrompt, query);
+            job.modes[id] = 'deep';
+            console.log(`Job ${jobId}: ${id} completed (deep)`);
+          } catch (deepErr) {
+            console.log(`Job ${jobId}: ${id} deep failed: ${deepErr.message}, falling back to quick`);
+            try {
+              const quickFn = PROVIDERS[agent.provider];
+              job.results[id] = await quickFn(agent.systemPrompt, query);
+              job.modes[id] = 'fallback';
+              job.errors[id] = deepErr.message;
+              console.log(`Job ${jobId}: ${id} completed (fallback to quick)`);
+            } catch (quickErr) {
+              job.modes[id] = 'failed';
+              job.errors[id] = `Deep: ${deepErr.message} | Quick: ${quickErr.message}`;
+              console.log(`Job ${jobId}: ${id} both failed: ${quickErr.message}`);
+            }
+          }
+        }
+        
+        // Capture cost from last usage entry for this agent
+        if (pool) {
+          try {
+            const { rows } = await pool.query('SELECT cost_usd, input_tokens, output_tokens FROM api_usage WHERE agent = $1 ORDER BY ts DESC LIMIT 1', [id]);
+            if (rows[0]) job.costs[id] = { cost: parseFloat(rows[0].cost_usd), input: rows[0].input_tokens, output: rows[0].output_tokens };
+          } catch (e) { /* ignore */ }
         }
       }));
 
       // If team consult, run synthesis
       if (agentIds.length > 1) {
         job.status = 'synthesizing';
-        console.log(`Job ${jobId}: all agents complete, starting deep synthesis via o3-deep-research...`);
+        console.log(`Job ${jobId}: all agents complete, starting ${synthMode} synthesis...`);
         const allResponses = agentIds
           .filter(id => job.results[id])
           .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${job.results[id]}`)
@@ -653,13 +687,25 @@ Final Recommendation (clear, actionable, with reasoning),
 Sources consulted during synthesis verification.
 
 Write in authoritative prose. Be thorough. This synthesis should be the ONLY document the decision-maker needs to read. Aim for 1500-3000 words depending on topic complexity.`;
-          job.synthesis = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+          if (synthMode === 'deep') {
+            job.synthesis = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+          } else {
+            const quickSynthPrompt = `You are the Principal Architect synthesizing analyst reports. Provide a clear synthesis: identify consensus, highlight disagreements and which side has stronger evidence, note gaps, give your recommendation. Write in authoritative prose, 500-800 words. Start with "SYNTHESIS:" on its own line.`;
+            job.synthesis = await callAnthropicDeep(quickSynthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+          }
         } catch (e) {
-          console.log(`Job ${jobId}: deep synthesis failed (${e.message}), falling back to Claude Opus...`);
+          console.log(`Job ${jobId}: synthesis failed (${e.message}), falling back...`);
           try {
-            const fallbackPrompt = `You are the Principal Architect synthesizing four research reports. Provide a comprehensive synthesis: identify consensus, resolve conflicts, highlight gaps, give a clear recommendation. Write in authoritative prose, 800-1500 words. Start with "SYNTHESIS REPORT" header.`;
+            const fallbackPrompt = `You are the Principal Architect synthesizing research reports. Provide a comprehensive synthesis: identify consensus, resolve conflicts, highlight gaps, give a clear recommendation. Write in authoritative prose, 800-1500 words. Start with "SYNTHESIS REPORT" header.`;
             job.synthesis = await callAnthropicDeep(fallbackPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
           } catch (e2) { job.synthesis = `Synthesis error: ${e2.message}`; }
+        }
+        // Capture synthesis cost
+        if (pool) {
+          try {
+            const { rows } = await pool.query("SELECT cost_usd, input_tokens, output_tokens FROM api_usage WHERE agent IN ('chatgpt','claude') ORDER BY ts DESC LIMIT 1");
+            if (rows[0]) job.synthesisCost = { cost: parseFloat(rows[0].cost_usd), input: rows[0].input_tokens, output: rows[0].output_tokens };
+          } catch (e) { /* ignore */ }
         }
       }
 
@@ -699,7 +745,7 @@ function formatJobResults(job) {
 
 // --- MCP Server ---
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.5.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.6.0' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -799,7 +845,7 @@ function createMcpServer() {
         error: job.errors[id] || null
       };
     }
-    return res.json({ status: 'synthesizing', elapsed, results, progress: Object.fromEntries(job.agentIds.map(id => [id, { status: 'done', mode: job.modes[id] }])) });
+    return res.json({ status: 'synthesizing', elapsed, results, costs: job.costs || {}, progress: Object.fromEntries(job.agentIds.map(id => [id, { status: 'done', mode: job.modes[id] }])) });
   }
 
   if (job.status === 'researching') {
@@ -1053,9 +1099,18 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/consult', async (req, res) => {
   try {
-    const { agentId, query, priorResponses, mode } = req.body;
+    const { agentId, query, priorResponses, mode, agentModes, activeAgents, consolidatorMode } = req.body;
 
-    // Deep mode: start background job for all agents
+    // Team mode (deep or mixed): start background job with per-agent config
+    if (mode === 'team') {
+      const agents = activeAgents || ['claude', 'chatgpt', 'gemini', 'grok'];
+      const modes = agentModes || {};
+      const consMode = consolidatorMode || 'quick';
+      const jobId = startDeepJob('web_consult', query, agents, modes, consMode);
+      return res.json({ jobId });
+    }
+
+    // Legacy deep mode: all agents deep
     if (mode === 'deep') {
       const jobId = startDeepJob('web_consult', query, ['claude', 'chatgpt', 'gemini', 'grok']);
       return res.json({ jobId });
@@ -1081,11 +1136,16 @@ app.post('/api/consult', async (req, res) => {
 
 app.post('/api/synthesize', async (req, res) => {
   try {
-    const { query, allResponses } = req.body;
-
-    const synthPrompt = `You are a senior research analyst producing a comprehensive synthesis report from four independent AI analysts. VERIFY claims via web search, CROSS-REFERENCE findings, FILL GAPS with your own research, RESOLVE CONFLICTS using primary sources, and SYNTHESIZE into a definitive analysis. Include: Executive Summary, Areas of Consensus, Key Disagreements and Resolution, Critical Gaps, Risk Factors, Final Recommendation, and Sources. Write in authoritative prose, 1500-3000 words. Start with "SYNTHESIS REPORT" header.`;
-
-    const response = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+    const { query, allResponses, mode } = req.body;
+    let response;
+    
+    if (mode === 'deep') {
+      const synthPrompt = `You are a senior research analyst producing a comprehensive synthesis report from four independent AI analysts. VERIFY claims via web search, CROSS-REFERENCE findings, FILL GAPS with your own research, RESOLVE CONFLICTS using primary sources, and SYNTHESIZE into a definitive analysis. Include: Executive Summary, Areas of Consensus, Key Disagreements and Resolution, Critical Gaps, Risk Factors, Final Recommendation, and Sources. Write in authoritative prose, 1500-3000 words. Start with "SYNTHESIS REPORT" header.`;
+      response = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+    } else {
+      const synthPrompt = `You are the Principal Architect synthesizing analyst reports. Provide a clear, comprehensive synthesis: identify consensus, highlight important disagreements, note gaps, give your recommendation. Write in authoritative prose, 500-800 words. Start with "SYNTHESIS:" on its own line.`;
+      response = await callAnthropicDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+    }
     res.json({ response });
   } catch (err) {
     console.error('Synthesis error:', err.message);
@@ -1106,7 +1166,7 @@ app.get('/api/results/:jobId', (req, res) => {
       else if (job.modes[id] === 'failed') progress[id] = { status: 'failed', error: job.errors[id] };
       else progress[id] = { status: 'researching' };
     }
-    return res.json({ status: 'researching', elapsed, progress });
+    return res.json({ status: 'researching', elapsed, progress, costs: job.costs || {} });
   }
 
   if (job.status === 'completed') {
@@ -1122,11 +1182,64 @@ app.get('/api/results/:jobId', (req, res) => {
       status: 'completed',
       elapsed: +((job.completedAt - job.createdAt) / 1000).toFixed(1),
       results,
-      synthesis: job.synthesis
+      synthesis: job.synthesis,
+      costs: job.costs || {},
+      synthesisCost: job.synthesisCost || null,
+      consolidatorMode: job.consolidatorMode || 'deep'
     });
   }
 
   res.json({ status: job.status, elapsed });
+});
+
+// --- Cost Estimation ---
+app.post('/api/estimate', (req, res) => {
+  const { query, agentModes, consolidatorMode } = req.body;
+  // Estimate tokens from query length (rough: 1 token ≈ 4 chars)
+  const queryTokens = Math.ceil((query || '').length / 4);
+  
+  const ESTIMATES = {
+    claude:  { quick: { input: 2200 + queryTokens, output: 500,  model: 'claude-sonnet-4-20250514' },
+               deep:  { input: 5000 + queryTokens, output: 16000, model: 'claude-opus-4-6' } },
+    chatgpt: { quick: { input: 500 + queryTokens,  output: 500,  model: 'gpt-4o-mini' },
+               deep:  { input: 2000 + queryTokens,  output: 5000, model: 'o3-deep-research-2025-06-26' } },
+    gemini:  { quick: { input: 200 + queryTokens,   output: 500,  model: 'gemini-2.5-flash-lite' },
+               deep:  { input: 2000 + queryTokens,  output: 8000, model: 'deep-research-pro-preview-12-2025' } },
+    grok:    { quick: { input: 2500 + queryTokens,  output: 500,  model: 'grok-4-1-fast-non-reasoning' },
+               deep:  { input: 5000 + queryTokens,  output: 5000, model: 'grok-4-1-fast-reasoning' } }
+  };
+  
+  const SYNTH_ESTIMATES = {
+    quick: { input: 8000, output: 4000, model: 'claude-opus-4-6' },
+    deep:  { input: 25000, output: 5000, model: 'o3-deep-research-2025-06-26' }
+  };
+  
+  const modes = agentModes || {};
+  const estimates = {};
+  let total = 0;
+  
+  for (const [agent, mode] of Object.entries(modes)) {
+    if (mode === 'off') { estimates[agent] = { cost: 0, mode: 'off' }; continue; }
+    const est = ESTIMATES[agent]?.[mode] || ESTIMATES[agent]?.quick;
+    if (est) {
+      const cost = calcCost(est.model, est.input, est.output);
+      estimates[agent] = { cost: +cost.toFixed(4), mode, model: est.model, input: est.input, output: est.output };
+      total += cost;
+    }
+  }
+  
+  // Consolidator estimate (only if 2+ agents active)
+  const activeCount = Object.values(modes).filter(m => m !== 'off').length;
+  const consMode = consolidatorMode || 'quick';
+  let synthEstimate = null;
+  if (activeCount > 1) {
+    const se = SYNTH_ESTIMATES[consMode];
+    const synthCost = calcCost(se.model, se.input * (activeCount / 4), se.output);
+    synthEstimate = { cost: +synthCost.toFixed(4), mode: consMode, model: se.model };
+    total += synthCost;
+  }
+  
+  res.json({ estimates, consolidator: synthEstimate, total: +total.toFixed(4) });
 });
 
 // --- API Usage & Cost Tracking ---
