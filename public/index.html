@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A-Team Console v5.1</title>
+  <title>A-Team Console v5.6</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -457,6 +457,44 @@
       .query-hint { font-size: 10px; }
       .status-badge { font-size: 10px; padding: 3px 8px; }
     }
+
+    /* === Agent Controls === */
+    .roster-card { flex-wrap: wrap; position: relative; }
+    .agent-controls { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.04); }
+    .agent-power { width: 32px; height: 18px; border-radius: 9px; background: rgba(255,255,255,0.1); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+    .agent-power.on { background: rgba(16,185,129,0.4); }
+    .agent-power::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #475569; transition: all 0.2s; }
+    .agent-power.on::after { left: 16px; background: #10B981; }
+    .agent-mode-btns { display: flex; gap: 2px; background: rgba(255,255,255,0.05); border-radius: 6px; padding: 2px; }
+    .agent-mode-btn { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: #64748B; transition: all 0.2s; font-family: 'JetBrains Mono', monospace; }
+    .agent-mode-btn.active { background: rgba(255,255,255,0.1); color: #E2E8F0; }
+    .agent-mode-btn.deep.active { background: rgba(245,158,11,0.25); color: #F59E0B; }
+    .agent-est { margin-left: auto; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #64748B; }
+    .agent-est.has-cost { color: #F59E0B; }
+    .roster-card.off { opacity: 0.35; }
+    .roster-card.off .agent-mode-btns { pointer-events: none; }
+    .cost-meter { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
+    .cost-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .cost-icon { font-size: 16px; }
+    .cost-label { font-size: 12px; color: #64748B; font-weight: 500; letter-spacing: 0.5px; }
+    .cost-total { margin-left: auto; font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #F59E0B; }
+    .cost-breakdown { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .cost-item { font-size: 11px; color: #94A3B8; font-family: 'JetBrains Mono', monospace; }
+    .cost-item .name { color: #64748B; }
+    .cost-item .val { color: #E2E8F0; font-weight: 600; }
+    .cost-item.off .val { color: #475569; }
+    .cost-footer { display: flex; gap: 24px; font-size: 11px; color: #475569; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 8px; }
+    .cost-footer strong { color: #94A3B8; }
+    .register { background: rgba(16,185,129,0.05); border: 1px solid rgba(16,185,129,0.2); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; animation: registerIn 0.5s ease; }
+    .register-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .register-label { font-size: 12px; color: #10B981; font-weight: 600; letter-spacing: 0.5px; }
+    .register-total { margin-left: auto; font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #10B981; }
+    .register-breakdown { display: flex; gap: 12px; flex-wrap: wrap; }
+    .register-item { font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+    .register-item .name { color: #64748B; }
+    .register-item .val { color: #10B981; font-weight: 600; }
+    @keyframes registerIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    .consolidator-label { font-size: 10px; color: #64748B; letter-spacing: 0.5px; margin-right: 4px; }
   </style>
 </head>
 <body>
@@ -466,8 +504,8 @@
       <div class="confirm-icon">&#x1F52C;</div>
       <div class="confirm-title">Deep Research Mode</div>
       <div class="confirm-text">
-        Deep research takes 5-15 minutes. Each agent will conduct thorough web research
-        with extended thinking and analysis. Continue?
+        This consultation will take 2-15 minutes depending on agent modes.
+        <div id="confirmCostPreview" style="margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:13px;color:#F59E0B;"></div>
       </div>
       <div class="confirm-btns">
         <button class="confirm-no" onclick="cancelDeep()">Cancel</button>
@@ -481,7 +519,7 @@
       <div class="logo">A</div>
       <div>
         <div class="header-title">A-TEAM CONSOLE</div>
-        <div class="header-sub">v5.1 &middot; 4 AI BRAINS &middot; 4 REAL APIs</div>
+        <div class="header-sub">v5.6 &middot; 4 AI BRAINS &middot; 4 REAL APIs</div>
       </div>
     </div>
     <div class="header-right">
@@ -504,42 +542,66 @@
     <div class="roster">
       <div class="roster-card" id="card-claude" style="--agent-color:#F59E0B66;">
         <div class="agent-avatar" style="background:#D97706;">C</div>
-        <div style="min-width:0;">
-          <div class="agent-name">Claude</div>
-          <div class="agent-role">Principal Architect</div>
-        </div>
+        <div style="min-width:0;flex:1;"><div class="agent-name">Claude</div><div class="agent-role">Principal Architect</div></div>
         <div class="thinking-label" style="color:#D97706;display:none;" id="think-claude">THINKING...</div>
         <div class="done-dot" style="display:none;" id="done-claude"></div>
+        <div class="agent-controls">
+          <div class="agent-power on" id="power-claude" onclick="toggleAgentPower('claude')"></div>
+          <div class="agent-mode-btns"><button class="agent-mode-btn active" id="btn-claude-quick" onclick="setAgentMode('claude','quick')">Quick</button><button class="agent-mode-btn deep" id="btn-claude-deep" onclick="setAgentMode('claude','deep')">Deep</button></div>
+          <div class="agent-est" id="est-claude">~$0.007</div>
+        </div>
       </div>
       <div class="roster-card" id="card-chatgpt" style="--agent-color:#10B98166;">
         <div class="agent-avatar" style="background:#059669;">G</div>
-        <div style="min-width:0;">
-          <div class="agent-name">ChatGPT</div>
-          <div class="agent-role">Financial Analyst</div>
-        </div>
+        <div style="min-width:0;flex:1;"><div class="agent-name">ChatGPT</div><div class="agent-role">Financial Analyst</div></div>
         <div class="thinking-label" style="color:#059669;display:none;" id="think-chatgpt">THINKING...</div>
         <div class="done-dot" style="display:none;" id="done-chatgpt"></div>
+        <div class="agent-controls">
+          <div class="agent-power on" id="power-chatgpt" onclick="toggleAgentPower('chatgpt')"></div>
+          <div class="agent-mode-btns"><button class="agent-mode-btn active" id="btn-chatgpt-quick" onclick="setAgentMode('chatgpt','quick')">Quick</button><button class="agent-mode-btn deep" id="btn-chatgpt-deep" onclick="setAgentMode('chatgpt','deep')">Deep</button></div>
+          <div class="agent-est" id="est-chatgpt">~$0.000</div>
+        </div>
       </div>
       <div class="roster-card" id="card-gemini" style="--agent-color:#3B82F666;">
         <div class="agent-avatar" style="background:#2563EB;">G</div>
-        <div style="min-width:0;">
-          <div class="agent-name">Gemini</div>
-          <div class="agent-role">Data Analyst</div>
-        </div>
+        <div style="min-width:0;flex:1;"><div class="agent-name">Gemini</div><div class="agent-role">Data Analyst</div></div>
         <div class="thinking-label" style="color:#2563EB;display:none;" id="think-gemini">THINKING...</div>
         <div class="done-dot" style="display:none;" id="done-gemini"></div>
+        <div class="agent-controls">
+          <div class="agent-power on" id="power-gemini" onclick="toggleAgentPower('gemini')"></div>
+          <div class="agent-mode-btns"><button class="agent-mode-btn active" id="btn-gemini-quick" onclick="setAgentMode('gemini','quick')">Quick</button><button class="agent-mode-btn deep" id="btn-gemini-deep" onclick="setAgentMode('gemini','deep')">Deep</button></div>
+          <div class="agent-est" id="est-gemini">~$0.000</div>
+        </div>
       </div>
       <div class="roster-card" id="card-grok" style="--agent-color:#EF444466;">
         <div class="agent-avatar" style="background:#DC2626;">X</div>
-        <div style="min-width:0;">
-          <div class="agent-name">Grok</div>
-          <div class="agent-role">Devil's Advocate</div>
-        </div>
+        <div style="min-width:0;flex:1;"><div class="agent-name">Grok</div><div class="agent-role">Devil's Advocate</div></div>
         <div class="thinking-label" style="color:#DC2626;display:none;" id="think-grok">THINKING...</div>
         <div class="done-dot" style="display:none;" id="done-grok"></div>
+        <div class="agent-controls">
+          <div class="agent-power on" id="power-grok" onclick="toggleAgentPower('grok')"></div>
+          <div class="agent-mode-btns"><button class="agent-mode-btn active" id="btn-grok-quick" onclick="setAgentMode('grok','quick')">Quick</button><button class="agent-mode-btn deep" id="btn-grok-deep" onclick="setAgentMode('grok','deep')">Deep</button></div>
+          <div class="agent-est" id="est-grok">~$0.001</div>
+        </div>
       </div>
     </div>
 
+    <!-- Cost Meter -->
+    <div class="cost-meter" id="costMeter">
+      <div class="cost-header">
+        <span class="cost-icon">&#x1F4B0;</span>
+        <span class="cost-label">ESTIMATED COST</span>
+        <span class="cost-total" id="costTotal">$0.00</span>
+      </div>
+      <div class="cost-breakdown" id="costBreakdown"></div>
+      <div class="cost-footer">
+        <span>Today: <strong id="costToday">$0.00</strong></span>
+        <span>All-time: <strong id="costAllTime">$0.00</strong></span>
+      </div>
+    </div>
+
+    <!-- Register (shown after completion) -->
+    <div id="registerPanel" style="display:none;"></div>
     <!-- Query Input -->
     <div class="query-area">
       <textarea id="queryInput" class="query-input" rows="3"
@@ -550,6 +612,7 @@
           <span class="deep-timer" id="deepTimer" style="display:none;">0:00</span>
         </div>
         <div class="query-controls">
+          <span class="consolidator-label">CONSOLIDATOR:</span>
           <div class="mode-toggle" id="modeToggle" onclick="toggleMode()">
             <div class="mode-slider" id="modeSlider"></div>
             <span class="mode-opt active" id="optQuick">Quick</span>
@@ -595,11 +658,95 @@
       { id: 'gemini', name: 'Gemini', role: 'Data Analyst & Ranker', color: '#2563EB', provider: 'Google' },
       { id: 'grok', name: 'Grok', role: "Devil's Advocate & Risk Analyst", color: '#DC2626', provider: 'xAI' }
     ];
-
     let isRunning = false;
     let history = [];
     let currentMode = 'quick';
     let pendingDeepQuery = null;
+
+    const agentConfig = {
+      claude:  { on: true, mode: 'quick' },
+      chatgpt: { on: true, mode: 'quick' },
+      gemini:  { on: true, mode: 'quick' },
+      grok:    { on: true, mode: 'quick' }
+    };
+
+    function toggleAgentPower(id) {
+      if (isRunning) return;
+      agentConfig[id].on = !agentConfig[id].on;
+      const el = document.getElementById('power-' + id);
+      const card = document.getElementById('card-' + id);
+      if (agentConfig[id].on) { el.classList.add('on'); card.classList.remove('off'); }
+      else { el.classList.remove('on'); card.classList.add('off'); }
+      updateEstimate();
+    }
+
+    function setAgentMode(id, mode) {
+      if (isRunning) return;
+      agentConfig[id].mode = mode;
+      document.getElementById('btn-' + id + '-quick').classList.toggle('active', mode === 'quick');
+      document.getElementById('btn-' + id + '-deep').classList.toggle('active', mode === 'deep');
+      updateEstimate();
+    }
+
+    function getActiveAgents() { return Object.entries(agentConfig).filter(([_, c]) => c.on).map(([id]) => id); }
+    function getAgentModes() {
+      const modes = {};
+      for (const [id, c] of Object.entries(agentConfig)) modes[id] = c.on ? c.mode : 'off';
+      return modes;
+    }
+
+    async function updateEstimate() {
+      const query = document.getElementById('queryInput').value || 'sample query';
+      try {
+        const res = await fetch('/api/estimate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, agentModes: getAgentModes(), consolidatorMode: currentMode })
+        });
+        const data = await res.json();
+        for (const [id, est] of Object.entries(data.estimates)) {
+          const el = document.getElementById('est-' + id);
+          if (el) {
+            if (est.mode === 'off') { el.textContent = ''; el.classList.remove('has-cost'); }
+            else { el.textContent = '~$' + est.cost.toFixed(est.cost < 0.01 ? 4 : 2); el.classList.add('has-cost'); }
+          }
+        }
+        const breakdown = document.getElementById('costBreakdown');
+        let items = '';
+        for (const agent of AGENTS) {
+          const est = data.estimates[agent.id];
+          if (est) {
+            const cls = est.mode === 'off' ? 'cost-item off' : 'cost-item';
+            const val = est.mode === 'off' ? 'OFF' : '$' + est.cost.toFixed(est.cost < 0.01 ? 4 : 2);
+            items += '<span class="' + cls + '"><span class="name">' + agent.name + ':</span> <span class="val">' + val + '</span></span> ';
+          }
+        }
+        if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(2) + '</span></span>';
+        breakdown.innerHTML = items;
+        document.getElementById('costTotal').textContent = '$' + data.total.toFixed(2);
+      } catch (e) {}
+    }
+
+    async function loadUsageStats() {
+      try {
+        const res = await fetch('/api/usage');
+        const data = await res.json();
+        if (data.today) document.getElementById('costToday').textContent = '$' + (data.today.today_cost || '0.00');
+        if (data.total) document.getElementById('costAllTime').textContent = '$' + (data.total.total_cost || '0.00');
+      } catch (e) {}
+    }
+
+    function showRegister(costs, synthesisCost) {
+      const panel = document.getElementById('registerPanel');
+      let total = 0, items = '';
+      for (const agent of AGENTS) {
+        const c = costs[agent.id];
+        if (c) { total += c.cost; items += '<span class="register-item"><span class="name">' + agent.name + ':</span> <span class="val">$' + c.cost.toFixed(4) + '</span></span> '; }
+      }
+      if (synthesisCost) { total += synthesisCost.cost; items += '<span class="register-item"><span class="name">Consolidator:</span> <span class="val">$' + synthesisCost.cost.toFixed(4) + '</span></span>'; }
+      panel.innerHTML = '<div class="register"><div class="register-header"><span class="register-icon">&#x1F9FE;</span><span class="register-label">ACTUAL COST</span><span class="register-total">$' + total.toFixed(4) + '</span></div><div class="register-breakdown">' + items + '</div></div>';
+      panel.style.display = 'block';
+      loadUsageStats();
+    }
 
     // --- Load user info ---
     async function loadUser() {
@@ -644,13 +791,17 @@
       loadUser();
       checkHealth();
       requestAnimationFrame(updateToggleUI);
+      updateEstimate();
+      loadUsageStats();
+      document.getElementById('queryInput').addEventListener('input', debounce(updateEstimate, 500));
     });
-
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     // --- Mode Toggle ---
     function toggleMode() {
       if (isRunning) return;
       currentMode = currentMode === 'quick' ? 'deep' : 'quick';
       updateToggleUI();
+      updateEstimate();
     }
 
     function updateToggleUI() {
@@ -684,7 +835,7 @@
       document.getElementById('deepConfirm').style.display = 'none';
       const query = pendingDeepQuery;
       pendingDeepQuery = null;
-      if (query) await runDeepConsultation(query);
+      if (query) await runTeamConsultation(query);
     }
 
     // Check API health on load
@@ -806,175 +957,104 @@
     async function runConsultation() {
       const query = input.value.trim();
       if (!query || isRunning) return;
-
-      if (currentMode === 'deep') {
+      const activeAgents = getActiveAgents();
+      if (activeAgents.length === 0) {
+        document.getElementById('errorBox').textContent = 'No agents active. Turn on at least one consultant.';
+        document.getElementById('errorBox').style.display = 'block';
+        return;
+      }
+      const hasDeep = activeAgents.some(id => agentConfig[id].mode === 'deep') || currentMode === 'deep';
+      if (hasDeep) {
         pendingDeepQuery = query;
+        document.getElementById('confirmCostPreview').textContent = 'Estimated cost: ' + document.getElementById('costTotal').textContent;
         document.getElementById('deepConfirm').style.display = 'flex';
         return;
       }
-
-      await runQuickConsultation(query);
+      await runTeamConsultation(query);
     }
-
     // --- Quick mode (existing synchronous flow) ---
-    async function runQuickConsultation(query) {
+    // Unified team consultation — handles all modes via background job
+    async function runTeamConsultation(query) {
       isRunning = true;
+      const activeAgents = getActiveAgents();
+      const modes = getAgentModes();
+      const hasDeep = activeAgents.some(id => agentConfig[id].mode === 'deep') || currentMode === 'deep';
+      
       document.getElementById('runBtn').disabled = true;
-      document.getElementById('runBtn').textContent = 'CONSULTING...';
+      document.getElementById('runBtn').textContent = hasDeep ? '\u{1F52C} RESEARCHING...' : 'CONSULTING...';
       document.getElementById('responses').innerHTML = '';
+      document.getElementById('registerPanel').style.display = 'none';
       document.getElementById('emptyState').style.display = 'none';
       document.getElementById('errorBox').style.display = 'none';
 
-      let priorText = '';
-      const allResponses = {};
+      AGENTS.forEach(a => {
+        if (agentConfig[a.id].on) showAgent(a.id, agentConfig[a.id].mode === 'deep' ? 'researching' : 'thinking');
+        else showAgent(a.id, 'idle');
+      });
 
-      try {
-        for (const agent of AGENTS) {
-          showAgent(agent.id, 'thinking');
-          document.getElementById('statusHint').textContent = `Consulting ${agent.name}...`;
-
-          const res = await authFetch('/api/consult', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agentId: agent.id,
-              query: query,
-              priorResponses: priorText
-            })
-          });
-
-          const data = await res.json();
-          if (data.error) throw new Error(`${agent.name}: ${data.error}`);
-
-          allResponses[agent.id] = data.response;
-          priorText += `\n\n${agent.name} (${agent.role}): ${data.response}`;
-
-          showAgent(agent.id, 'done');
-          addResponseCard(agent, data.response);
-        }
-
-        // Synthesis
-        document.getElementById('statusHint').textContent = 'Synthesizing team perspectives...';
-        const synthRes = await authFetch('/api/synthesize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, allResponses: priorText })
-        });
-        const synthData = await synthRes.json();
-        if (synthData.error) throw new Error(`Synthesis: ${synthData.error}`);
-        addSynthesisCard(synthData.response);
-
-        // Save to history
-        history.unshift({
-          query, responses: allResponses, synthesis: synthData.response,
-          timestamp: new Date().toLocaleTimeString()
-        });
-        updateHistoryUI();
-
-      } catch (err) {
-        if (err.message === 'Session expired') return;
-        document.getElementById('errorBox').textContent = 'Error: ' + err.message;
-        document.getElementById('errorBox').style.display = 'block';
-      }
-
-      isRunning = false;
-      document.getElementById('runBtn').disabled = false;
-      document.getElementById('runBtn').textContent = 'CONSULT A-TEAM';
-      document.getElementById('statusHint').textContent = '4 real AI providers \u2014 each agent is a different brain';
-      AGENTS.forEach(a => showAgent(a.id, 'idle'));
-    }
-
-    // --- Deep Research mode (async with polling) ---
-    async function runDeepConsultation(query) {
-      isRunning = true;
-      document.getElementById('runBtn').disabled = true;
-      document.getElementById('runBtn').textContent = '\u{1F52C} DEEP RESEARCH...';
-      document.getElementById('responses').innerHTML = '';
-      document.getElementById('emptyState').style.display = 'none';
-      document.getElementById('errorBox').style.display = 'none';
-
-      // Show all agents as researching simultaneously
-      AGENTS.forEach(a => showAgent(a.id, 'researching'));
-
-      // Start elapsed timer
       const startTime = Date.now();
       const timerEl = document.getElementById('deepTimer');
       timerEl.style.display = 'inline';
       timerEl.textContent = '0:00';
       const timerInterval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const mins = Math.floor(elapsed / 60);
-        const secs = elapsed % 60;
-        timerEl.textContent = mins + ':' + String(secs).padStart(2, '0');
+        timerEl.textContent = Math.floor(elapsed / 60) + ':' + String(elapsed % 60).padStart(2, '0');
       }, 1000);
 
-      document.getElementById('statusHint').textContent = '\u{1F52C} Deep research in progress \u2014 all 4 agents researching simultaneously...';
+      const activeCount = activeAgents.length;
+      document.getElementById('statusHint').textContent = hasDeep
+        ? '\u{1F52C} Research in progress \u2014 ' + activeCount + ' agents working...'
+        : 'Consulting ' + activeCount + ' agents...';
 
       try {
-        // Start deep job
         const res = await authFetch('/api/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, mode: 'deep' })
+          body: JSON.stringify({ query, mode: 'team', activeAgents, agentModes: modes, consolidatorMode: currentMode })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         const jobId = data.jobId;
 
-        // Poll for results every 5 seconds
         while (true) {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise(r => setTimeout(r, 3000));
           const pollRes = await authFetch('/api/results/' + jobId);
           const poll = await pollRes.json();
-
           if (poll.error) throw new Error(poll.error);
 
-          if (poll.status === 'researching') {
-            // Update individual agent statuses
+          if (poll.status === 'researching' || poll.status === 'synthesizing') {
             let doneCount = 0;
-            for (const agent of AGENTS) {
-              const p = poll.progress[agent.id];
-              if (p && p.status === 'done') {
-                showAgent(agent.id, 'done');
-                doneCount++;
-              } else if (p && p.status === 'failed') {
-                showAgent(agent.id, 'done');
-                doneCount++;
-              }
+            for (const id of activeAgents) {
+              const p = poll.progress?.[id];
+              if (p && (p.status === 'done' || p.status === 'failed')) { showAgent(id, 'done'); doneCount++; }
             }
-            document.getElementById('statusHint').textContent =
-              '\u{1F52C} Deep research \u2014 ' + doneCount + '/4 agents completed...';
+            document.getElementById('statusHint').textContent = poll.status === 'synthesizing'
+              ? '\u{1F4CA} All agents done \u2014 Consolidator synthesizing...'
+              : '\u{1F52C} ' + doneCount + '/' + activeCount + ' agents completed...';
             continue;
           }
 
           if (poll.status === 'completed') {
-            // Render all results
             for (const agent of AGENTS) {
+              if (!agentConfig[agent.id].on) continue;
               showAgent(agent.id, 'done');
               const r = poll.results[agent.id];
-              if (r && r.response) {
-                addResponseCard(agent, r.response, r.mode);
-              } else {
-                addResponseCard(agent, '\u274C Failed: ' + (r ? r.error : 'No response'));
-              }
+              if (r && r.response) addResponseCard(agent, r.response, r.mode);
+              else addResponseCard(agent, '\u274C Failed: ' + (r ? r.error : 'No response'));
             }
             if (poll.synthesis) addSynthesisCard(poll.synthesis);
+            if (poll.costs || poll.synthesisCost) showRegister(poll.costs || {}, poll.synthesisCost);
 
-            // Save to history
             const allResponses = {};
-            for (const agent of AGENTS) {
-              const r = poll.results[agent.id];
-              if (r && r.response) allResponses[agent.id] = r.response;
+            for (const id of activeAgents) {
+              const r = poll.results[id];
+              if (r && r.response) allResponses[id] = r.response;
             }
-            history.unshift({
-              query, responses: allResponses, synthesis: poll.synthesis,
-              timestamp: new Date().toLocaleTimeString()
-            });
+            history.unshift({ query, responses: allResponses, synthesis: poll.synthesis, timestamp: new Date().toLocaleTimeString() });
             updateHistoryUI();
             break;
           }
-
-          if (poll.status === 'failed') throw new Error('Deep research job failed');
+          if (poll.status === 'failed') throw new Error('Research job failed');
         }
       } catch (err) {
         if (err.message === 'Session expired') return;
@@ -987,9 +1067,10 @@
       isRunning = false;
       document.getElementById('runBtn').disabled = false;
       document.getElementById('runBtn').textContent = 'CONSULT A-TEAM';
-      document.getElementById('statusHint').textContent = '4 real AI providers \u2014 each agent is a different brain';
+      document.getElementById('statusHint').textContent = activeCount + ' AI providers ready';
       AGENTS.forEach(a => showAgent(a.id, 'idle'));
     }
+
 
     function updateHistoryUI() {
       const btn = document.getElementById('historyBtn');
