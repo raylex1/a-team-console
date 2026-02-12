@@ -563,20 +563,41 @@ function startDeepJob(toolName, query, agentIds) {
 
       // If team consult, run synthesis
       if (agentIds.length > 1) {
+        job.status = 'synthesizing';
+        console.log(`Job ${jobId}: all agents complete, starting deep synthesis via o3-deep-research...`);
         const allResponses = agentIds
           .filter(id => job.results[id])
           .map(id => `${AGENTS[id].name} (${AGENTS[id].role}):\n${job.results[id]}`)
           .join('\n\n');
         try {
-          const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
-- Identifies where the team agrees
-- Highlights the most important disagreements
-- Gives your architectural recommendation as team lead
-- Is honest about remaining uncertainties
+          const synthPrompt = `You are a senior research analyst producing a comprehensive synthesis report. You have received research reports from four independent AI analysts on the same topic. Your job is to produce a DEFINITIVE synthesis that a decision-maker can act on.
 
-Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
-          job.synthesis = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
-        } catch (e) { job.synthesis = `Synthesis error: ${e.message}`; }
+YOUR MANDATE:
+1. VERIFY: Use web search to fact-check the most important claims from each report. Flag any data points that conflict between reports or cannot be verified.
+2. CROSS-REFERENCE: Identify where multiple analysts independently reached the same conclusion (high confidence) vs where they disagree (needs investigation).
+3. FILL GAPS: If all four reports missed something important, research it yourself and add it.
+4. RESOLVE CONFLICTS: When reports contradict each other, determine which is correct using primary sources.
+5. SYNTHESIZE: Produce a unified analysis that is MORE valuable than any individual report alone.
+
+OUTPUT FORMAT:
+Start with "SYNTHESIS REPORT" as a header, then:
+Executive Summary (2-3 paragraphs with key findings, recommendation, confidence level),
+Areas of Consensus (what most analysts agree on with verified data),
+Key Disagreements and Resolution (conflicts found and which source is correct),
+Critical Gaps Identified (what was missed plus your own research to fill them),
+Risk Factors and Uncertainties (what we still do not know),
+Final Recommendation (clear, actionable, with reasoning),
+Sources consulted during synthesis verification.
+
+Write in authoritative prose. Be thorough. This synthesis should be the ONLY document the decision-maker needs to read. Aim for 1500-3000 words depending on topic complexity.`;
+          job.synthesis = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+        } catch (e) {
+          console.log(`Job ${jobId}: deep synthesis failed (${e.message}), falling back to Claude Opus...`);
+          try {
+            const fallbackPrompt = `You are the Principal Architect synthesizing four research reports. Provide a comprehensive synthesis: identify consensus, resolve conflicts, highlight gaps, give a clear recommendation. Write in authoritative prose, 800-1500 words. Start with "SYNTHESIS REPORT" header.`;
+            job.synthesis = await callAnthropicDeep(fallbackPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
+          } catch (e2) { job.synthesis = `Synthesis error: ${e2.message}`; }
+        }
       }
 
       job.status = 'completed';
@@ -615,7 +636,7 @@ function formatJobResults(job) {
 
 // --- MCP Server ---
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.1.1' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.4.0' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -655,14 +676,8 @@ function createMcpServer() {
 
     let synthesis = '';
     try {
-      const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
-- Identifies where the team agrees
-- Highlights the most important disagreements
-- Gives your architectural recommendation as team lead
-- Is honest about remaining uncertainties
-
-Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
-      synthesis = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
+      const synthPrompt = `You are the Principal Architect synthesizing four analyst reports. Provide a clear, comprehensive synthesis: identify consensus, highlight important disagreements and which side has stronger evidence, note gaps, and give your recommendation. Write in authoritative prose paragraphs. Aim for 500-800 words. Start with "SYNTHESIS:" on its own line.`;
+      synthesis = await callAnthropicDeep(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
     } catch (e) { synthesis = `Synthesis error: ${e.message}`; }
 
     const parts = agentIds.map(id => {
@@ -712,7 +727,19 @@ Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with
       return { content: [{ type: 'text', text: `Job not found: ${job_id}\n\nThe job may have expired (results are kept for 1 hour) or the server may have restarted.` }] };
     }
 
-    if (job.status === 'researching') {
+    if (job.status === 'synthesizing') {
+    const results = {};
+    for (const id of job.agentIds) {
+      results[id] = {
+        response: job.results[id] || null,
+        mode: job.modes[id] || null,
+        error: job.errors[id] || null
+      };
+    }
+    return res.json({ status: 'synthesizing', elapsed, results, progress: Object.fromEntries(job.agentIds.map(id => [id, { status: 'done', mode: job.modes[id] }])) });
+  }
+
+  if (job.status === 'researching') {
       const elapsed = ((Date.now() - job.createdAt) / 1000).toFixed(0);
       const done = Object.keys(job.results).length;
       const failed = Object.keys(job.errors).length;
@@ -993,15 +1020,9 @@ app.post('/api/synthesize', async (req, res) => {
   try {
     const { query, allResponses } = req.body;
 
-    const synthPrompt = `You are Claude, the Principal Architect. You just heard from all four A-Team members (including yourself). Now provide a brief SYNTHESIS that:
-- Identifies where the team agrees
-- Highlights the most important disagreements
-- Gives your architectural recommendation as team lead
-- Is honest about remaining uncertainties
+    const synthPrompt = `You are a senior research analyst producing a comprehensive synthesis report from four independent AI analysts. VERIFY claims via web search, CROSS-REFERENCE findings, FILL GAPS with your own research, RESOLVE CONFLICTS using primary sources, and SYNTHESIZE into a definitive analysis. Include: Executive Summary, Areas of Consensus, Key Disagreements and Resolution, Critical Gaps, Risk Factors, Final Recommendation, and Sources. Write in authoritative prose, 1500-3000 words. Start with "SYNTHESIS REPORT" header.`;
 
-Write in prose paragraphs, no bullet points. Keep it under 150 words. Start with "SYNTHESIS:" on its own line.`;
-
-    const response = await callAnthropic(synthPrompt, query + '\n\nTeam responses:\n' + allResponses);
+    const response = await callOpenAIDeep(synthPrompt, `ORIGINAL QUESTION: ${query}\n\n--- ANALYST REPORTS ---\n\n${allResponses}`);
     res.json({ response });
   } catch (err) {
     console.error('Synthesis error:', err.message);
