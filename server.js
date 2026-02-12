@@ -336,8 +336,7 @@ async function callOpenAIDeep(systemPrompt, userMessage) {
           { role: 'user', content: userMessage }
         ],
         background: true,
-        reasoning: { summary: 'auto' },
-        tools: [{ type: 'web_search_preview' }, { type: 'code_interpreter' }]
+        tools: [{ type: 'web_search_preview' }]
       })
     });
 
