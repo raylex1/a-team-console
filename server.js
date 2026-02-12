@@ -20,6 +20,59 @@ const BASE_URL = process.env.BASE_URL || 'https://polymetis.app';
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: false }) : null;
 if (pool) {
   pool.query('SELECT NOW()').then(() => console.log('PostgreSQL connected')).catch(e => console.log('PostgreSQL error:', e.message));
+  pool.query(`CREATE TABLE IF NOT EXISTS api_usage (
+    id SERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT NOW(),
+    agent TEXT NOT NULL,
+    model TEXT NOT NULL,
+    mode TEXT DEFAULT 'quick',
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    thinking_tokens INTEGER DEFAULT 0,
+    search_count INTEGER DEFAULT 0,
+    cost_usd NUMERIC(10,6) DEFAULT 0,
+    job_id TEXT,
+    duration_ms INTEGER DEFAULT 0,
+    context TEXT
+  )`).then(() => console.log('api_usage table ready')).catch(e => console.log('api_usage table error:', e.message));
+}
+
+// --- API Cost Tracking ---
+const PRICING = {
+  'claude-sonnet-4-20250514':    { input: 3.00,  output: 15.00 },
+  'claude-opus-4-6':             { input: 5.00,  output: 25.00 },
+  'claude-sonnet-4-5-20250929':  { input: 3.00,  output: 15.00 },
+  'o3-deep-research-2025-06-26': { input: 10.00, output: 40.00 },
+  'gpt-4o':                      { input: 2.50,  output: 10.00 },
+  'gpt-4o-mini':                 { input: 0.15,  output: 0.60  },
+  'gemini-2.5-flash-preview-04-17': { input: 0.15, output: 0.60 },
+  'gemini-2.5-flash-lite':       { input: 0.10,  output: 0.40  },
+  'deep-research-pro-preview-12-2025': { input: 0.10, output: 0.40 },
+  'grok-4-1-fast':               { input: 3.00,  output: 15.00 },
+  'grok-4-1-fast-non-reasoning': { input: 0.20,  output: 0.50  },
+  'grok-4-1-fast-reasoning':     { input: 0.20,  output: 0.50  },
+};
+
+function calcCost(model, inputTokens, outputTokens) {
+  const p = PRICING[model] || { input: 5.00, output: 25.00 };
+  return ((inputTokens / 1_000_000) * p.input) + ((outputTokens / 1_000_000) * p.output);
+}
+
+async function trackUsage({ agent, model, mode, input_tokens, output_tokens, thinking_tokens, search_count, job_id, duration_ms, context }) {
+  const cost = calcCost(model, input_tokens || 0, (output_tokens || 0) + (thinking_tokens || 0));
+  const record = { agent, model, mode: mode || 'quick', input_tokens: input_tokens || 0, output_tokens: output_tokens || 0, thinking_tokens: thinking_tokens || 0, search_count: search_count || 0, cost_usd: cost, job_id: job_id || null, duration_ms: duration_ms || 0, context: context || null };
+  
+  console.log(`💰 ${agent}/${model} [${mode}]: ${input_tokens || 0}in + ${output_tokens || 0}out + ${thinking_tokens || 0}think = ${cost.toFixed(4)}`);
+  
+  if (pool) {
+    try {
+      await pool.query(
+        'INSERT INTO api_usage (agent, model, mode, input_tokens, output_tokens, thinking_tokens, search_count, cost_usd, job_id, duration_ms, context) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [record.agent, record.model, record.mode, record.input_tokens, record.output_tokens, record.thinking_tokens, record.search_count, record.cost_usd, record.job_id, record.duration_ms, record.context]
+      );
+    } catch (e) { console.log('Usage tracking error:', e.message); }
+  }
+  return record;
 }
 
 app.set('trust proxy', 1);
@@ -190,6 +243,7 @@ async function callAnthropic(systemPrompt, userMessage) {
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
+  trackUsage({ agent: 'claude', model: 'claude-sonnet-4-20250514', mode: 'quick', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens, search_count: data.content?.filter(b => b.type === 'web_search_tool_result')?.length || 0 });
   return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
 }
 
@@ -217,6 +271,7 @@ async function callOpenAI(systemPrompt, userMessage) {
   if (data.error) throw new Error(data.error.message);
   const msg = data.output.find(o => o.type === 'message');
   if (!msg) throw new Error('No message in OpenAI response');
+  trackUsage({ agent: 'chatgpt', model: 'gpt-4o-mini', mode: 'quick', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens });
   return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
 }
 
@@ -237,6 +292,7 @@ async function callGoogle(systemPrompt, userMessage) {
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
+  trackUsage({ agent: 'gemini', model: 'gemini-2.5-flash-lite', mode: 'quick', input_tokens: data.usageMetadata?.promptTokenCount, output_tokens: data.usageMetadata?.candidatesTokenCount });
   return data.candidates[0].content.parts.map(p => p.text || '').join('\n');
 }
 
@@ -268,6 +324,7 @@ async function callXAI(systemPrompt, userMessage) {
   if (data.error) throw new Error(data.error.message);
   const msg = data.output.find(o => o.type === 'message');
   if (!msg) throw new Error('No message in xAI response');
+  trackUsage({ agent: 'grok', model: 'grok-4-1-fast-non-reasoning', mode: 'quick', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens });
   return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
 }
 
@@ -314,6 +371,8 @@ async function callAnthropicDeep(systemPrompt, userMessage) {
     data = await tryModel('claude-sonnet-4-5-20250929');
     if (data.error) throw new Error(data.error.message);
   }
+  const thinkTokens = data.usage?.cache_creation_input_tokens || 0;
+  trackUsage({ agent: 'claude', model: data.model || 'claude-opus-4-6', mode: 'deep', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens, thinking_tokens: thinkTokens, search_count: data.content?.filter(b => b.type === 'web_search_tool_result')?.length || 0 });
   return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
 }
 
@@ -358,6 +417,7 @@ async function callOpenAIDeep(systemPrompt, userMessage) {
       if (poll.status === 'completed') {
         const msg = poll.output.filter(o => o.type === 'message').pop();
         if (!msg) throw new Error('No message in deep research output');
+        trackUsage({ agent: 'chatgpt', model: 'o3-deep-research-2025-06-26', mode: 'deep', input_tokens: poll.usage?.input_tokens, output_tokens: poll.usage?.output_tokens, duration_ms: Date.now() - startTime });
         return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
       }
       if (poll.status === 'failed') throw new Error('Deep research failed');
@@ -394,6 +454,7 @@ async function callOpenAIDeep(systemPrompt, userMessage) {
     if (data.error) throw new Error(data.error.message);
     const msg = data.output.find(o => o.type === 'message');
     if (!msg) throw new Error('No message in OpenAI fallback response');
+    trackUsage({ agent: 'chatgpt', model: 'gpt-4o', mode: 'deep-fallback', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens });
     return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
   }
 }
@@ -435,6 +496,7 @@ async function callGoogleDeep(systemPrompt, userMessage) {
 
       if (poll.status === 'completed') {
         if (!poll.outputs || !poll.outputs.length) throw new Error('No outputs in deep research');
+        trackUsage({ agent: 'gemini', model: 'deep-research-pro-preview-12-2025', mode: 'deep', duration_ms: Date.now() - startTime });
         return poll.outputs.filter(o => o.type === 'text').map(o => o.text).join('\n');
       }
       if (poll.status === 'failed' || poll.status === 'cancelled') {
@@ -477,6 +539,7 @@ async function callXAIDeep(systemPrompt, userMessage) {
   if (data.error) throw new Error(data.error.message);
   const msg = data.output.find(o => o.type === 'message');
   if (!msg) throw new Error('No message in xAI response');
+  trackUsage({ agent: 'grok', model: 'grok-4-1-fast-reasoning', mode: 'deep', input_tokens: data.usage?.input_tokens, output_tokens: data.usage?.output_tokens });
   return msg.content.filter(c => c.type === 'output_text').map(c => c.text).join('\n');
 }
 
@@ -636,7 +699,7 @@ function formatJobResults(job) {
 
 // --- MCP Server ---
 function createMcpServer() {
-  const server = new McpServer({ name: 'a-team-console', version: '5.4.0' });
+  const server = new McpServer({ name: 'a-team-console', version: '5.5.0' });
 
   // Helper: call a single agent synchronously (quick mode only)
   async function consultAgentQuick(agentId, query) {
@@ -1064,6 +1127,58 @@ app.get('/api/results/:jobId', (req, res) => {
   }
 
   res.json({ status: job.status, elapsed });
+});
+
+// --- API Usage & Cost Tracking ---
+app.get('/api/usage', async (req, res) => {
+  if (!pool) return res.json({ error: 'No database' });
+  try {
+    const { rows: summary } = await pool.query(`
+      SELECT 
+        agent,
+        mode,
+        COUNT(*) as calls,
+        SUM(input_tokens) as total_input,
+        SUM(output_tokens) as total_output,
+        SUM(thinking_tokens) as total_thinking,
+        SUM(search_count) as total_searches,
+        ROUND(SUM(cost_usd)::numeric, 4) as total_cost,
+        ROUND(AVG(cost_usd)::numeric, 4) as avg_cost_per_call,
+        ROUND(AVG(duration_ms)::numeric, 0) as avg_duration_ms
+      FROM api_usage
+      GROUP BY agent, mode
+      ORDER BY total_cost DESC
+    `);
+    
+    const { rows: today } = await pool.query(`
+      SELECT 
+        ROUND(SUM(cost_usd)::numeric, 4) as today_cost,
+        COUNT(*) as today_calls
+      FROM api_usage
+      WHERE ts >= CURRENT_DATE
+    `);
+    
+    const { rows: total } = await pool.query(`
+      SELECT 
+        ROUND(SUM(cost_usd)::numeric, 4) as total_cost,
+        COUNT(*) as total_calls,
+        SUM(input_tokens) as total_input_tokens,
+        SUM(output_tokens) as total_output_tokens,
+        MIN(ts) as tracking_since
+      FROM api_usage
+    `);
+    
+    const { rows: recent } = await pool.query(`
+      SELECT agent, model, mode, input_tokens, output_tokens, thinking_tokens, 
+             ROUND(cost_usd::numeric, 4) as cost, duration_ms, context,
+             to_char(ts AT TIME ZONE 'America/New_York', 'MM/DD HH12:MI AM') as time_est
+      FROM api_usage 
+      ORDER BY ts DESC 
+      LIMIT 20
+    `);
+    
+    res.json({ summary, today: today[0], total: total[0], recent });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // --- Protected: Catch-all SPA ---
