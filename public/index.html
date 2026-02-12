@@ -707,7 +707,7 @@
           const el = document.getElementById('est-' + id);
           if (el) {
             if (est.mode === 'off') { el.textContent = ''; el.classList.remove('has-cost'); }
-            else { el.textContent = '~$' + est.cost.toFixed(4); el.classList.add('has-cost'); }
+            else { el.textContent = '~$' + est.cost.toFixed(5); el.classList.add('has-cost'); }
           }
         }
         const breakdown = document.getElementById('costBreakdown');
@@ -716,13 +716,13 @@
           const est = data.estimates[agent.id];
           if (est) {
             const cls = est.mode === 'off' ? 'cost-item off' : 'cost-item';
-            const val = est.mode === 'off' ? 'OFF' : '$' + est.cost.toFixed(4);
+            const val = est.mode === 'off' ? 'OFF' : '$' + est.cost.toFixed(5);
             items += '<span class="' + cls + '"><span class="name">' + agent.name + ':</span> <span class="val">' + val + '</span></span> ';
           }
         }
-        if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(4) + '</span></span>';
+        if (data.consolidator) items += '<span class="cost-item"><span class="name">Consolidator:</span> <span class="val">$' + data.consolidator.cost.toFixed(5) + '</span></span>';
         breakdown.innerHTML = items;
-        document.getElementById('costTotal').textContent = '$' + data.total.toFixed(4);
+        document.getElementById('costTotal').textContent = '$' + data.total.toFixed(5);
       } catch (e) {}
     }
 
@@ -740,10 +740,10 @@
       let total = 0, items = '';
       for (const agent of AGENTS) {
         const c = costs[agent.id];
-        if (c) { total += c.cost; items += '<span class="register-item"><span class="name">' + agent.name + ':</span> <span class="val">$' + c.cost.toFixed(4) + '</span></span> '; }
+        if (c) { total += c.cost; items += '<span class="register-item"><span class="name">' + agent.name + ':</span> <span class="val">$' + c.cost.toFixed(5) + '</span></span> '; }
       }
-      if (synthesisCost) { total += synthesisCost.cost; items += '<span class="register-item"><span class="name">Consolidator:</span> <span class="val">$' + synthesisCost.cost.toFixed(4) + '</span></span>'; }
-      panel.innerHTML = '<div class="register"><div class="register-header"><span class="register-icon">&#x1F9FE;</span><span class="register-label">ACTUAL COST</span><span class="register-total">$' + total.toFixed(4) + '</span></div><div class="register-breakdown">' + items + '</div></div>';
+      if (synthesisCost) { total += synthesisCost.cost; items += '<span class="register-item"><span class="name">Consolidator:</span> <span class="val">$' + synthesisCost.cost.toFixed(5) + '</span></span>'; }
+      panel.innerHTML = '<div class="register"><div class="register-header"><span class="register-icon">&#x1F9FE;</span><span class="register-label">ACTUAL COST</span><span class="register-total">$' + total.toFixed(5) + '</span></div><div class="register-breakdown">' + items + '</div></div>';
       panel.style.display = 'block';
       loadUsageStats();
     }
