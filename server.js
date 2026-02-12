@@ -1200,7 +1200,7 @@ app.post('/api/estimate', (req, res) => {
   
   const ESTIMATES = {
     claude:  { quick: { input: 2200 + queryTokens, output: 500,  model: 'claude-sonnet-4-20250514' },
-               deep:  { input: 5000 + queryTokens, output: 46000, model: 'claude-opus-4-6' } }  // 16K response + 30K thinking,
+               deep:  { input: 5000 + queryTokens, output: 46000, model: 'claude-opus-4-6' } },  // 16K response + 30K thinking
     chatgpt: { quick: { input: 500 + queryTokens,  output: 500,  model: 'gpt-4o-mini' },
                deep:  { input: 2000 + queryTokens,  output: 5000, model: 'o3-deep-research-2025-06-26' } },
     gemini:  { quick: { input: 200 + queryTokens,   output: 500,  model: 'gemini-2.5-flash-lite' },
