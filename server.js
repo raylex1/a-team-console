@@ -1079,6 +1079,7 @@ app.delete('/mcp', (req, res) => {
 app.use((req, res, next) => {
   if (!oauthConfigured) return next();
   if (req.isAuthenticated()) return next();
+  if (req.path.startsWith('/sniper')) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
   res.redirect('/login');
 });
