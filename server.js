@@ -1455,8 +1455,7 @@ app.get('/sniper/api/status', (req, res) => {
 });
 app.post('/sniper/api/login', async (req, res) => { res.json(await sniperLogin()); });
 app.post('/sniper/api/mfa', async (req, res) => {
-  let body = ''; req.on('data', d => body += d);
-  req.on('end', async () => { try { res.json(await sniperMfa(JSON.parse(body).code)); } catch(e) { res.json({error:e.message}); } });
+  try { res.json(await sniperMfa(req.body.code)); } catch(e) { res.json({error:e.message}); }
 });
 app.post('/sniper/api/stop', (req, res) => { stopSniperPolling(); res.json({success:true}); });
 app.post('/sniper/api/resume', (req, res) => {
