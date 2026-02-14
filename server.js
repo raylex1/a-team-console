@@ -1353,13 +1353,16 @@ async function sniperLogin() {
     if (res.data?.errors?.[0]?.code === 'MFA_CODE_REQUIRED') {
       sniper.mfaToken = res.data.data.mfa_token;
       sniper.status = 'AWAITING_MFA';
-      sniperLog('MFA required — waiting for code');
+      sniperLog('MFA required — token length: ' + (sniper.mfaToken||'').length);
+      // Persist to DB so it survives server restarts
+      if (pool) { try { await pool.query("INSERT INTO journal (key,value,updated_at) VALUES ('sniper_mfa_token',$1,NOW()) ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()", [sniper.mfaToken]); } catch(e) {} }
       return { needsMfa: true };
     } else if (res.data?.data?.token) {
       sniper.token = res.data.data.token;
       sniper.tokenIssuedAt = Date.now();
       sniper.status = 'ACTIVE';
       sniperLog('Logged in (no MFA)');
+      if (pool) { try { await pool.query("INSERT INTO journal (key,value,updated_at) VALUES ('sniper_session_token',$1,NOW()) ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()", [sniper.token]); } catch(e) {} }
       startSniperPolling();
       return { success: true };
     }
