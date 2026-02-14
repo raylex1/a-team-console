@@ -1473,6 +1473,28 @@ app.post('/sniper/api/resume', (req, res) => {
 
 sniperLog('Pugovka Shift Sniper loaded — visit /sniper to activate');
 
+// Auto-recover sniper session from DB on startup
+if (pool) {
+  setTimeout(async () => {
+    try {
+      const r = await pool.query("SELECT value FROM journal WHERE key='sniper_session_token'");
+      if (r.rows[0] && r.rows[0].value) {
+        sniper.token = r.rows[0].value;
+        sniper.tokenIssuedAt = Date.now();
+        // Test if token is still valid
+        const test = await sniperApi(sniper.config.apiHost, '/2/shifts?start=' + new Date().toISOString() + '&end=' + new Date().toISOString() + '&all_locations=true&include_allopen=true', 'GET', sniperHeaders());
+        if (test.status === 200) {
+          sniper.status = 'ACTIVE';
+          sniperLog('RECOVERED session from DB — resuming polling!');
+          startSniperPolling();
+        } else {
+          sniperLog('Stored token expired — need re-auth');
+        }
+      }
+    } catch(e) { sniperLog('Recovery check failed: ' + e.message); }
+  }, 3000);
+}
+
 // --- Protected: Catch-all SPA ---
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
