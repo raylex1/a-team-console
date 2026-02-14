@@ -1372,7 +1372,11 @@ async function sniperLogin() {
 }
 
 async function sniperMfa(code) {
-  sniperLog('Submitting MFA code: ' + code);
+  // Recover mfaToken from DB if lost due to restart
+  if (!sniper.mfaToken && pool) {
+    try { const r = await pool.query("SELECT value FROM journal WHERE key='sniper_mfa_token'"); if (r.rows[0]) sniper.mfaToken = r.rows[0].value; } catch(e) {}
+  }
+  sniperLog('Submitting MFA code: ' + code + ' | token present: ' + !!sniper.mfaToken + ' | token length: ' + (sniper.mfaToken||'').length);
   try {
     const res = await sniperApi(sniper.config.loginHost, '/enter/' + code, 'GET',
       { 'Authorization': 'Bearer ' + sniper.mfaToken, 'content-type': 'application/json' });
