@@ -1388,6 +1388,7 @@ async function sniperMfa(code) {
         sniper.tokenIssuedAt = Date.now();
         sniper.status = 'ACTIVE';
         sniperLog('MFA verified — SNIPER ACTIVE!');
+        if (pool) { try { await pool.query("INSERT INTO journal (key,value,updated_at) VALUES ('sniper_session_token',$1,NOW()) ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()", [sniper.token]); } catch(e) {} }
         startSniperPolling();
         return { success: true };
       }
